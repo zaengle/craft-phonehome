@@ -1,0 +1,62 @@
+{
+    "name": "zaengle/craft-phonehome",
+    "description": "Phone Home plugin for Craft CMS",
+    "type": "craft-plugin",
+    "version": "1.0.0",
+    "keywords": [
+        "craft",
+        "cms",
+        "craftcms",
+        "craft-plugin"
+    ],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Zaengle",
+            "homepage": "https://zaengle.com"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/zaengle/craft-phonehome/issues",
+        "source": "https://github.com/zaengle/craft-phonehome"
+    },
+    "require": {
+        "php": ">=8.0.2",
+        "craftcms/cms": "^4.0.0|^5.0.0"
+    },
+    "require-dev": {
+        "roave/security-advisories": "dev-latest",
+        "phpunit/phpunit": "^9.5",
+        "mockery/mockery": "^1.5",
+      "craftcms/phpstan": "dev-main",
+        "craftcms/ecs": "dev-main"
+    },
+    "autoload": {
+        "psr-4": {
+            "zaengle\\phonehome\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "zaengle\\phonehome\\tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "name": "Phone Home",
+        "handle": "phonehome",
+        "class": "zaengle\\phonehome\\PhoneHome"
+    },
+    "scripts": {
+        "phpstan": "phpstan analyse --memory-limit=1G src/",
+        "check-cs": "ecs check --ansi",
+        "fix-cs": "ecs check --ansi --fix"
+    },
+    "config": {
+        "allow-plugins": {
+            "yiisoft/yii2-composer": true,
+            "craftcms/plugin-installer": true
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}

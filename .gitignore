@@ -1,0 +1,43 @@
+# PhpStorm files
+.idea/
+.idea_modules/
+*.iml
+*.iws
+*.ipr
+.phpstorm.meta.php
+_ide_helper.php
+_ide_helper_models.php
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Composer
+/vendor/
+/composer.phar
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+/logs/
+*.log
+
+# Build artifacts
+/build/
+
+# Cache
+.phpunit.result.cache
+.php_cs.cache
+
+# Node modules (if using frontend tooling)
+/node_modules/

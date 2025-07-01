@@ -1,0 +1,27 @@
+{
+  "name": "phonehome",
+  "version": "1.0.0",
+  "description": "This plugin requires Craft CMS 4.0.0 or later, or Craft CMS 5.0.0 or later.",
+  "homepage": "https://github.com/zaengle/craft-phonehome#readme",
+  "bugs": {
+    "url": "https://github.com/zaengle/craft-phonehome/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zaengle/craft-phonehome.git"
+  },
+  "license": "MIT",
+  "author": "Zaengle",
+  "type": "commonjs",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "version": "auto-changelog -p && git add CHANGELOG.md"
+  },
+  "devDependencies": {
+    "auto-changelog": "^2.5.0"
+  }
+}
