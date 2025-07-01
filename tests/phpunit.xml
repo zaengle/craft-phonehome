@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="bootstrap.php"
+         colors="true"
+         verbose="true"
+         stopOnFailure="false">
+    <testsuites>
+        <testsuite name="Example">
+            <directory>example</directory>
+        </testsuite>
+        <testsuite name="Unit">
+            <directory>unit</directory>
+        </testsuite>
+        <testsuite name="Functional">
+            <directory>functional</directory>
+        </testsuite>
+    </testsuites>
+    <coverage>
+        <include>
+            <directory suffix=".php">../src</directory>
+        </include>
+        <exclude>
+            <directory>../src/templates</directory>
+            <directory>../src/migrations</directory>
+            <directory>../src/translations</directory>
+            <directory>../src/web/assets</directory>
+        </exclude>
+    </coverage>
+    <php>
+        <env name="APP_ENV" value="testing"/>
+        <env name="PHONE_HOME_TOKEN" value="test-token"/>
+    </php>
+</phpunit>
