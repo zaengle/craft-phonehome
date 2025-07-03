@@ -1,8 +1,10 @@
 <?php
+
 namespace zaengle\phonehome\models;
 
 use craft\base\Model;
 use craft\helpers\App;
+
 /**
  * PhoneHome Plugin Settings Model
  *
@@ -15,7 +17,7 @@ class Settings extends Model
     public ?string $token = null;
     public array $additionalEnvKeys = [];
 
-    public function rules() : array
+    public function rules(): array
     {
         return [
             [['token'], 'required'],

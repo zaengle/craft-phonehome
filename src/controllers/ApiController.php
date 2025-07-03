@@ -1,12 +1,11 @@
 <?php
+
 namespace zaengle\phonehome\controllers;
 
 use Craft;
-use craft\helpers\App;
 use craft\web\Controller;
 use yii\web\Response;
 use yii\web\UnauthorizedHttpException;
-use yii\web\MethodNotAllowedHttpException;
 use zaengle\phonehome\PhoneHome;
 
 class ApiController extends Controller

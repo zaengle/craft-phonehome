@@ -25,8 +25,12 @@
         "craftcms/cms": "^4.0.0|^5.0.0"
     },
     "require-dev": {
+        "roave/security-advisories": "dev-latest"
+        ,
         "phpunit/phpunit": "^9.5",
-        "mockery/mockery": "^1.5"
+        "mockery/mockery": "^1.5",
+      "craftcms/phpstan": "dev-main",
+        "craftcms/ecs": "dev-main"
     },
     "autoload": {
         "psr-4": {
@@ -45,12 +49,17 @@
     },
     "scripts": {
         "test": "phpunit --configuration tests/phpunit.xml",
-        "test:unit": "phpunit --configuration tests/phpunit.xml --testsuite Unit"
+        "test:unit": "phpunit --configuration tests/phpunit.xml --testsuite Unit",
+        "phpstan": "phpstan analyse --memory-limit=1G src/",
+        "check-cs": "ecs check --ansi",
+        "fix-cs": "ecs check --ansi --fix"
     },
     "config": {
         "allow-plugins": {
             "yiisoft/yii2-composer": true,
             "craftcms/plugin-installer": true
         }
-    }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
 }

@@ -1,4 +1,5 @@
 <?php
+
 namespace zaengle\phonehome;
 
 use Craft;
@@ -48,7 +49,7 @@ class PhoneHome extends BasePlugin
         ];
     }
 
-    protected function createSettingsModel() : Settings
+    protected function createSettingsModel(): Settings
     {
         return new Settings();
     }
@@ -89,7 +90,7 @@ class PhoneHome extends BasePlugin
         Event::on(
             UrlManager::class,
             UrlManager::EVENT_REGISTER_SITE_URL_RULES,
-            function (RegisterUrlRulesEvent $event) {
+            function(RegisterUrlRulesEvent $event) {
                 $event->rules['phone-home'] = 'phonehome/api/index';
             }
         );

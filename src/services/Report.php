@@ -4,13 +4,13 @@ namespace zaengle\phonehome\services;
 
 use Composer\InstalledVersions;
 use Craft;
-use OutOfBoundsException;
-use RequirementsChecker;
 use craft\db\Connection;
 use craft\enums\CmsEdition;
 use craft\helpers\App;
 use craft\helpers\Db;
 use craft\models\UpdateRelease;
+use OutOfBoundsException;
+use RequirementsChecker;
 use yii\base\Component;
 use zaengle\phonehome\PhoneHome;
 
@@ -64,7 +64,6 @@ class Report extends Component
 
     protected function getSystemInfo(bool $expandPhpInfo = false): array
     {
-
         $updatesService = Craft::$app->getUpdates();
         $info = [
             'php' => [
@@ -92,7 +91,7 @@ class Report extends Component
                 ],
                 'requirements' => $this->requirementsStatus(),
                 'aliases' => $this->getAliases(),
-            ]
+            ],
         ];
 
         // Try to add additional dependency versions if InstalledVersions is available
@@ -165,7 +164,7 @@ class Report extends Component
     protected function getPluginsInfo(): array
     {
         return collect(Craft::$app->getPlugins()->getAllPluginInfo())
-            ->mapWithKeys(function ($info, $handle) {
+            ->mapWithKeys(function($info, $handle) {
                 return [
                     $handle => [
                         'name' => $info['name'] ?? $handle,
@@ -354,7 +353,7 @@ class Report extends Component
         return $phpInfo;
     }
 
-    private function getCraftEdition():string
+    private function getCraftEdition(): string
     {
         if (class_exists(CmsEdition::class, false) && Craft::$app->edition instanceof CmsEdition) {
             return Craft::$app->edition->name;
