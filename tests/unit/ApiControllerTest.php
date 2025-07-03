@@ -5,7 +5,7 @@ use PHPUnit\Framework\TestCase;
 use PHPUnit\Framework\MockObject\MockObject;
 use zaengle\phonehome\controllers\ApiController;
 use zaengle\phonehome\handlers\ApiHandlerFactory;
-use zaengle\phonehome\Plugin;
+use zaengle\phonehome\PhoneHome;
 use yii\web\Response;
 use yii\web\Request;
 use yii\web\HeaderCollection;
@@ -40,7 +40,7 @@ class ApiControllerTest extends TestCase
 
         // Since we're just testing that our test infrastructure works,
         // we'll create a minimal controller without full dependency injection
-        $this->pluginMock = $this->createMock(Plugin::class);
+        $this->pluginMock = $this->createMock(PhoneHome::class);
         $this->controller = new class('api', $this->pluginMock) extends ApiController {
             // Override methods that would try to access Craft
             public function asJson($data): Response {

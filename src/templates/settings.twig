@@ -1,0 +1,24 @@
+{% import "_includes/forms" as forms %}
+
+{% macro configWarning(setting) -%}
+  {% set setting = '<code>'~setting~'</code>' %}
+  {{ "This is being overridden by the {setting} config setting in your {file} config file."|t('token', {
+    setting: setting,
+    file: 'phonehome.php',
+  })|raw }}
+{%- endmacro %}
+
+{% from _self import configWarning %}
+
+{{ forms.autosuggestField({
+  label: "Token"|t('phonehome'),
+  id: 'token',
+  name: 'token',
+  instructions: "This is should be set to the value that the calling service will provide in a `X-Auth-Token` header"|t('phonehome'),
+  disabled: 'token' in overrides,
+  warning: 'token' in overrides ? configWarning('token'),
+  value: settings.token,
+  errors: settings.getErrors('token'),
+  suggestEnvVars: true,
+  required: true,
+}) }}

@@ -7,6 +7,7 @@ use craft\web\Controller;
 use yii\web\Response;
 use yii\web\UnauthorizedHttpException;
 use yii\web\MethodNotAllowedHttpException;
+use zaengle\phonehome\PhoneHome;
 
 class ApiController extends Controller
 {
@@ -16,21 +17,26 @@ class ApiController extends Controller
 
     public function actionIndex(): Response
     {
-        if (!Craft::$app->getRequest()->isPost) {
-            throw new MethodNotAllowedHttpException('Method Not Allowed. Only POST requests are supported.');
-        }
+        $this->requirePostRequest();
+        $this->requireAcceptsJson();
+        $this->checkToken();
 
-        // Get authorization header
+        $expandPhpInfo = $this->request->getBodyParam('expandPhpInfo', false);
+
+        return $this->asJson(PhoneHome::$plugin->report->getInfo($expandPhpInfo));
+    }
+
+    protected function checkToken(): void
+    {
         $headers = Craft::$app->getRequest()->getHeaders();
         $token = $headers->get('X-Auth-Token');
 
-        // Verify the token matches the environment variable
-        $expectedToken = App::env('PHONE_HOME_TOKEN');
-
-        if (!$expectedToken || $token !== $expectedToken) {
-            throw new UnauthorizedHttpException('Invalid token');
+        if (!$token) {
+            throw new UnauthorizedHttpException('A token is required');
         }
 
-        return $this->asJson(ApiHandlerFactory::create()->getInfo());
+        if ($token !== PhoneHome::$plugin->getSettings()->getToken()) {
+            throw new UnauthorizedHttpException('Invalid token');
+        }
     }
 }

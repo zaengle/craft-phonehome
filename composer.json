@@ -1,5 +1,5 @@
 {
-    "name": "zaengle/phonehome",
+    "name": "zaengle/craft-phonehome",
     "description": "Phone Home plugin for Craft CMS",
     "type": "craft-plugin",
     "version": "1.0.0",
@@ -41,7 +41,7 @@
     "extra": {
         "name": "Phone Home",
         "handle": "phonehome",
-        "class": "zaengle\\phonehome\\Plugin"
+        "class": "zaengle\\phonehome\\PhoneHome"
     },
     "scripts": {
         "test": "phpunit --configuration tests/phpunit.xml",
