@@ -14,7 +14,7 @@
   label: "Token"|t('phonehome'),
   id: 'token',
   name: 'token',
-  instructions: "This is should be set to the value that the calling service will provide in a `X-Auth-Token` header"|t('phonehome'),
+  instructions: "This should be set to the value that the calling service will provide in a `X-Auth-Token` header"|t('phonehome'),
   disabled: 'token' in overrides,
   warning: 'token' in overrides ? configWarning('token'),
   value: settings.token,
