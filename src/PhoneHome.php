@@ -22,7 +22,9 @@ class PhoneHome extends BasePlugin
 
     public bool $hasCpSettings = true;
 
-    public static $plugin;
+    public static PhoneHome $plugin;
+
+    public static string $apiVersion = '1.0.0';
 
     public function init(): void
     {

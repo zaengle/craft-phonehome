@@ -31,6 +31,7 @@ class Report extends Component
     public function getInfo(bool $expandPhpInfo = false): array
     {
         return [
+            'api_version' => PhoneHome::$apiVersion,
             'timestamp' => date('c'),
             'php_version' => App::phpVersion(),
             'craft_version' => Craft::$app->getVersion(),
