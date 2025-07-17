@@ -4,9 +4,6 @@ namespace zaengle\phonehome;
 
 use Craft;
 use craft\base\Plugin as BasePlugin;
-use craft\events\RegisterUrlRulesEvent;
-use craft\web\UrlManager;
-use yii\base\Event;
 use zaengle\phonehome\models\Settings;
 use zaengle\phonehome\services\Report;
 use zaengle\phonehome\traits\HasOwnLogfile;
@@ -89,12 +86,5 @@ class PhoneHome extends BasePlugin
 
     private function attachEventHandlers(): void
     {
-        Event::on(
-            UrlManager::class,
-            UrlManager::EVENT_REGISTER_SITE_URL_RULES,
-            function(RegisterUrlRulesEvent $event) {
-                $event->rules['phone-home'] = 'phonehome/api/index';
-            }
-        );
     }
 }
