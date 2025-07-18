@@ -2,7 +2,7 @@
 
 Phonehome exposes a single controller endpoint at `/actions/phonehome/api` with information about your Craft installation and the server environment it is installed in. 
 
-The plugin can be configured either via it's settings page in the Craft control panel or via its config file, a starter version of which will be automatically created at `config/phonehome.php` as part of the plugin's install command.
+The plugin can be configured either via its settings page in the Craft control panel or via its config file, a starter version of which will be automatically created at `config/phonehome.php` as part of the plugin's install command.
 
 ## Getting started
 
