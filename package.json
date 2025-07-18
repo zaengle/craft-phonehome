@@ -1,8 +1,20 @@
 {
   "name": "phonehome",
   "version": "1.0.0",
-  "description": "This plugin requires Craft CMS 4.0.0 or later, or Craft CMS 5.0.0 or later.",
+  "description": "Monitor the status of your #CraftCMS projects remotely",
   "homepage": "https://github.com/zaengle/craft-phonehome#readme",
+  "main": "docs/index.md",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "docs:dev": "VITE_PLUGIN_VERSION=$(npm run version:get) vitepress dev docs",
+    "docs:build": "VITE_PLUGIN_VERSION=$(npm run version:get) vitepress build docs",
+    "docs:serve": "VITE_PLUGIN_VERSION=$(npm run version:get) vitepress serve docs",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "version:bump": "auto-changelog -p && git add CHANGELOG.md",
+    "version:get": "echo $npm_package_version"
+  },
   "bugs": {
     "url": "https://github.com/zaengle/craft-phonehome/issues"
   },
@@ -12,16 +24,10 @@
   },
   "license": "MIT",
   "author": "Zaengle",
-  "type": "commonjs",
-  "main": "index.js",
-  "directories": {
-    "test": "tests"
-  },
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "version": "auto-changelog -p && git add CHANGELOG.md"
-  },
   "devDependencies": {
     "auto-changelog": "^2.5.0"
+  },
+  "dependencies": {
+    "vitepress": "^1.6.3"
   }
 }
