@@ -8,7 +8,7 @@ The plugin can be configured either via it's settings page in the Craft control 
 
 The config file supports the following keys:
 
-- `token` - a shared, secret, token that will be used to authenticate requests to the Phone Home API. If you are using the [phonehome.zaengle.com](https://phone-home.zaengle.com/) service, this token should match the token provided in your account settings there. If not, this should be set to a secure, random string.
+- `token` - a shared, secret, token that will be used to authenticate requests to the Phone Home API. This should be set to a secure, random string.
 - `additionalEnvKeys` - an array of environment keys to include in the API response. These keys will be added to the `meta` section of the response, allowing you to send custom site-specific or environment-specific data to the Phone Home service.
 
 Example:

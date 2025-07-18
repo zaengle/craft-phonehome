@@ -1,8 +1,10 @@
 
-console.log({ version: process.env})
+import schema from '../../src/schemas/PhonehomeApi.schema.json';
+import pkg from '../../package.json';
+
 export default {
-  title: 'Craft Phone Home',
-  description: 'Stylish off-server image transforms #craftcms projects',
+  title: 'Phonehome for Craft CMS',
+  description: 'Monitor the status of your #CraftCMS projects remotely',
   themeConfig: {
     logo: '/zaengle.svg',
     nav: [
@@ -35,7 +37,8 @@ export default {
   },
   vite: {
     define: {
-      __PLUGIN_VERSION__: JSON.stringify(process.env.VITE_PLUGIN_VERSION),
+      __API_VERSION__: JSON.stringify(schema.version),
+      __PLUGIN_VERSION__: JSON.stringify(pkg.version),
     }
   }
 };

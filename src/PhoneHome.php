@@ -4,6 +4,10 @@ namespace zaengle\phonehome;
 
 use Craft;
 use craft\base\Plugin as BasePlugin;
+use Twig\Error\LoaderError;
+use Twig\Error\RuntimeError;
+use Twig\Error\SyntaxError;
+use yii\base\Exception;
 use zaengle\phonehome\models\Settings;
 use zaengle\phonehome\services\Report;
 use zaengle\phonehome\traits\HasOwnLogfile;
@@ -21,7 +25,28 @@ class PhoneHome extends BasePlugin
 
     public static PhoneHome $plugin;
 
-    public static string $apiVersion = '1.0.0';
+    /**
+     * Get the API version from the JSON schema
+     *
+     * @return string The API version
+     */
+    public static function getApiVersion(): string
+    {
+        return self::getSchema()['version'] ?? '1.0.0';
+    }
+
+    public static function getSchema(): array
+    {
+        $schemaPath = self::getSchemaPath();
+
+        $schemaContent = file_get_contents($schemaPath);
+        return json_decode($schemaContent, JSON_FORCE_OBJECT);
+    }
+
+    public static function getSchemaPath(): string
+    {
+        return Craft::getAlias('@zaengle/phonehome/schemas/PhonehomeApi.schema.json');
+    }
 
     public function init(): void
     {
@@ -58,6 +83,10 @@ class PhoneHome extends BasePlugin
      * block on the settings page.
      *
      * @return string The rendered settings HTML
+     * @throws LoaderError
+     * @throws RuntimeError
+     * @throws SyntaxError
+     * @throws Exception
      */
     protected function settingsHtml(): string
     {

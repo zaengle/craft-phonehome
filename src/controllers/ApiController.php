@@ -4,6 +4,8 @@ namespace zaengle\phonehome\controllers;
 
 use Craft;
 use craft\web\Controller;
+use yii\web\BadRequestHttpException;
+use yii\web\MethodNotAllowedHttpException;
 use yii\web\Response;
 use yii\web\UnauthorizedHttpException;
 use zaengle\phonehome\PhoneHome;
@@ -25,6 +27,25 @@ class ApiController extends Controller
         return $this->asJson(PhoneHome::$plugin->report->getInfo($expandPhpInfo));
     }
 
+    /**
+     * @throws UnauthorizedHttpException
+     * @throws MethodNotAllowedHttpException
+     * @throws BadRequestHttpException
+     */
+    public function actionSchema(): Response
+    {
+        if ($this->request->method !== 'GET') {
+            throw new MethodNotAllowedHttpException('This endpoint only accepts GET requests');
+        }
+        $this->requireAcceptsJson();
+        $this->checkToken();
+
+        return $this->asJson(PhoneHome::getSchema());
+    }
+
+    /**
+     * @throws UnauthorizedHttpException
+     */
     protected function checkToken(): void
     {
         $headers = Craft::$app->getRequest()->getHeaders();
