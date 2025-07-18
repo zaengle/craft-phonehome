@@ -40,7 +40,7 @@ class PhoneHome extends BasePlugin
         $schemaPath = self::getSchemaPath();
 
         $schemaContent = file_get_contents($schemaPath);
-        return json_decode($schemaContent, JSON_FORCE_OBJECT);
+        return json_decode($schemaContent, true);
     }
 
     public static function getSchemaPath(): string
