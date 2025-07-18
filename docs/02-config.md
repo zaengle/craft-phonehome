@@ -18,7 +18,7 @@ return [
   '*' => [
     // Available transformers that should be registered with Craft
     'token' => getenv('PHONEHOME_TOKEN'),
-    'additionalEnvKeys' => 'MY_CUSTOM_KEY', 'ANOTHER_KEY'],
+    'additionalEnvKeys' => ['MY_CUSTOM_KEY', 'ANOTHER_KEY'],
   ],
 ];
 ```
