@@ -1,0 +1,287 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "version": "1.0.0",
+  "title": "Phone Home API Response Schema",
+  "description": "Schema for the Phone Home API response (output of Report::getInfo() method)",
+  "type": "object",
+  "required": [
+    "api_version",
+    "timestamp",
+    "php_version",
+    "craft_version",
+    "craft_edition",
+    "ip_address",
+    "environment",
+    "dev_mode",
+    "composer_lock_updated",
+    "system",
+    "plugins",
+    "modules",
+    "updates",
+    "meta"
+  ],
+  "properties": {
+    "api_version": {
+      "type": "string",
+      "description": "The version of the Phone Home API"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "The timestamp when the report was generated"
+    },
+    "php_version": {
+      "type": "string",
+      "description": "The PHP version"
+    },
+    "craft_version": {
+      "type": "string",
+      "description": "The Craft CMS version"
+    },
+    "craft_edition": {
+      "type": "string",
+      "description": "The Craft CMS edition"
+    },
+    "ip_address": {
+      "type": "string",
+      "description": "The IP address of the server"
+    },
+    "environment": {
+      "type": "string",
+      "description": "The environment name"
+    },
+    "dev_mode": {
+      "type": "boolean",
+      "description": "Whether dev mode is enabled"
+    },
+    "composer_lock_updated": {
+      "type": "string",
+      "format": "date-time",
+      "description": "The timestamp when the composer.lock file was last updated"
+    },
+    "system": {
+      "type": "object",
+      "description": "System information",
+      "properties": {
+        "php": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "The name of the PHP interpreter"
+            },
+            "version": {
+              "type": "string",
+              "description": "The PHP version"
+            },
+            "info": {
+              "type": ["object", "null"],
+              "description": "Detailed PHP information (only included if expandPhpInfo is true)"
+            }
+          }
+        },
+        "os": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "The operating system name"
+            },
+            "version": {
+              "type": "string",
+              "description": "The operating system version"
+            }
+          }
+        },
+        "database": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "The database driver name"
+            },
+            "version": {
+              "type": "string",
+              "description": "The database server version"
+            }
+          }
+        },
+        "image": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "The image driver name (GD or Imagick)"
+            },
+            "version": {
+              "type": "string",
+              "description": "The image driver version"
+            }
+          }
+        },
+        "craft": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "string",
+              "description": "The Craft CMS version"
+            },
+            "edition": {
+              "type": "string",
+              "description": "The Craft CMS edition"
+            },
+            "update_status": {
+              "type": "object",
+              "properties": {
+                "total_available_updates": {
+                  "type": "integer",
+                  "description": "The total number of available updates"
+                },
+                "pending_migrations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "The list of pending migration handles"
+                },
+                "was_craft_breakpoint_skipped": {
+                  "type": "boolean",
+                  "description": "Whether a Craft breakpoint was skipped"
+                },
+                "is_update_pending": {
+                  "type": "boolean",
+                  "description": "Whether an update is pending"
+                },
+                "is_craft_update_pending": {
+                  "type": "boolean",
+                  "description": "Whether a Craft update is pending"
+                },
+                "is_plugin_update_pending": {
+                  "type": "boolean",
+                  "description": "Whether a plugin update is pending"
+                },
+                "is_critical_update_available": {
+                  "type": "boolean",
+                  "description": "Whether a critical update is available"
+                }
+              }
+            },
+            "requirements": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "description": "The Craft CMS requirements status"
+            },
+            "aliases": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "The Craft CMS aliases"
+            }
+          }
+        }
+      },
+      "additionalProperties": {
+        "type": "string",
+        "description": "Additional system information (Yii, Twig, Guzzle versions if available)"
+      }
+    },
+    "plugins": {
+      "type": "object",
+      "description": "Information about installed plugins",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The plugin name"
+          },
+          "handle": {
+            "type": "string",
+            "description": "The plugin handle"
+          },
+          "description": {
+            "type": "string",
+            "description": "The plugin description"
+          },
+          "version": {
+            "type": "string",
+            "description": "The plugin version"
+          },
+          "is_installed": {
+            "type": "boolean",
+            "description": "Whether the plugin is installed"
+          },
+          "is_enabled": {
+            "type": "boolean",
+            "description": "Whether the plugin is enabled"
+          },
+          "is_upgrade_available": {
+            "type": "boolean",
+            "description": "Whether an upgrade is available for the plugin"
+          }
+        }
+      }
+    },
+    "modules": {
+      "type": "object",
+      "description": "Information about installed modules",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "class": {
+            "type": "string",
+            "description": "The module class name"
+          }
+        }
+      }
+    },
+    "updates": {
+      "type": "array",
+      "description": "Information about available updates",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name of the package with an available update"
+          },
+          "abandoned": {
+            "type": ["boolean", "null"],
+            "description": "Whether the package is abandoned"
+          },
+          "status": {
+            "type": ["string", "null"],
+            "description": "The status of the package"
+          },
+          "version": {
+            "type": "string",
+            "description": "The version of the update"
+          },
+          "package": {
+            "type": "string",
+            "description": "The package name"
+          },
+          "critical": {
+            "type": "boolean",
+            "description": "Whether the update is critical"
+          },
+          "release_date": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The release date of the update"
+          }
+        }
+      }
+    },
+    "meta": {
+      "type": ["object", "array"],
+      "description": "Additional metadata from environment variables",
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  }
+}

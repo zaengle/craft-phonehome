@@ -1,0 +1,14 @@
+:root {
+    --zaengle-teal-1: #277C72;
+    --zaengle-teal-3: #49C5B6;
+    --zaengle-teal-2: #277C72;
+
+    --vp-c-brand-1: var(--zaengle-teal-1);
+    --vp-c-brand-2: var(--zaengle-teal-3);
+    --vp-c-brand-3: var(--zaengle-teal-3);
+    --vp-c-brand-soft: var(--zaengle-teal-3);
+}
+
+.dark {
+    --zaengle-teal-1: #9CEADE;
+}
