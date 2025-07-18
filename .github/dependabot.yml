@@ -5,7 +5,7 @@ version: 2
 updates:
   # Maintain dependencies for Composer
   - package-ecosystem: "composer"
-    directory: "/src/"
+    directory: "/"
     schedule:
       interval: "weekly"
   # Maintain dependencies for npm
