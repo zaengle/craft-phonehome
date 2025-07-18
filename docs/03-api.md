@@ -38,7 +38,7 @@ When making a request to the `/actions/phonehome/api` endpoint, you can include 
 
 ## API Schema
 
-A JSON Schema for the API response is available at `/actions/phonehome/schema`. This schema describes the structure of the API response, including the fields and their types. You can use this schema to validate the API response in your integration. To avoid unnecessary leaking information, **requests for the schema still check for a valid token**. You can find a static copy of the schema in the `src/schemas/PhoneomeApi.schema.json` file.
+A JSON Schema for the API response is available at `/actions/phonehome/schema`. This schema describes the structure of the API response, including the fields and their types. You can use this schema to validate the API response in your integration. To avoid unnecessary leaking information, **requests for the schema still check for a valid token**. You can find a static copy of the schema in the `src/schemas/PhonehomeApi.schema.json` file.
 
 
 ## Sample API Response
