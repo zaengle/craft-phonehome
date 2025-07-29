@@ -183,23 +183,18 @@ class Report extends Component
 
     protected function getModulesInfo(): array
     {
+        $nonPluginModuleHandles = array_diff(
+            array_keys(Craft::$app->modules),
+            array_keys(Craft::$app->plugins->allPluginInfo)
+        );
+
         $modules = [];
 
-        $appConfig = require Craft::getAlias('@config/app.php');
-
-        if (isset($appConfig['modules']) && is_array($appConfig['modules'])) {
-            foreach ($appConfig['modules'] as $id => $moduleConfig) {
-                $className = null;
-                if (is_string($moduleConfig)) {
-                    $className = $moduleConfig;
-                } elseif (is_array($moduleConfig) && isset($moduleConfig['class'])) {
-                    $className = $moduleConfig['class'];
-                }
-                if ($className) {
-                    $modules[$id] = [
-                        'class' => $className,
-                    ];
-                }
+        foreach (Craft::$app->modules as $handle => $module) {
+            if (in_array($handle, $nonPluginModuleHandles, true)) {
+                $modules[$handle] = [
+                    'class' => get_class($module),
+                ];
             }
         }
 
