@@ -1,5 +1,10 @@
 # Release Notes for Craft Phone Home Plugin
 
+## [1.1.2] - 2025-07-29
+
+- Update changelog [`8890417`](https://github.com/zaengle/craft-phonehome/commit/8890417ae5baaca23882595de8e3ea0b7948d7c3)
+- fixed: ensure modules are objects before calling get_class() on them [`6165f4c`](https://github.com/zaengle/craft-phonehome/commit/6165f4cbe9269d8baee4a0197f52204a2dc6e26f)
+
 ## [1.1.1] - 2025-07-29
 
 - fixed: PHP warning from require of config/app.php when mapping installed modules [`db9aea2`](https://github.com/zaengle/craft-phonehome/commit/db9aea239c4fec3398a0535cc09dd358be827930)
@@ -25,5 +30,6 @@
 
 - Initial commit [`490a6d0`](https://github.com/zaengle/craft-phonehome/commit/490a6d0b08758d148f64d2c90720a057d590316b)
 
+[1.1.2]: https://github.com/zaengle/craft-phonehome/compare/1.1.1...1.1.2
 [1.1.1]: https://github.com/zaengle/craft-phonehome/compare/1.1.0...1.1.1
 [1.1.0]: https://github.com/zaengle/craft-phonehome/compare/v1.0.0...1.1.0

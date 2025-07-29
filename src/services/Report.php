@@ -193,7 +193,7 @@ class Report extends Component
         foreach (Craft::$app->modules as $handle => $module) {
             if (in_array($handle, $nonPluginModuleHandles, true)) {
                 $modules[$handle] = [
-                    'class' => get_class($module),
+                    'class' => is_object($module) ? get_class($module) : $module,
                 ];
             }
         }
