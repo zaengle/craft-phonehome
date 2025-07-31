@@ -1,5 +1,8 @@
 # Release Notes for Craft Phone Home Plugin
 
+## [1.1.3] - 2025-07-31
+- fixed: update handling of cms release dates [`3e3ebb4`](https://github.com/zaengle/craft-phonehome/commit/3e3ebb41c90c1d4a7f168b670d8b6caab96b5d1b)
+
 ## [1.1.2] - 2025-07-29
 
 - Update changelog [`8890417`](https://github.com/zaengle/craft-phonehome/commit/8890417ae5baaca23882595de8e3ea0b7948d7c3)
