@@ -220,7 +220,7 @@ class Report extends Component
                         'version' => $release->version,
                         'package' => 'craftcms/cms',
                         'critical' => $release->critical,
-                        'release_date' => date('c', $release->date),
+                        'release_date' => $release->date?->format('c'),
 //                        'notes' => $release->notes,
                     ];
                 }
