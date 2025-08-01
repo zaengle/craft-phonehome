@@ -32,6 +32,7 @@ class Report extends Component
     {
         return [
             'api_version' => PhoneHome::getApiVersion(),
+            'build_id' => Craft::$app->config->general->buildId,
             'timestamp' => date('c'),
             'php_version' => App::phpVersion(),
             'craft_version' => Craft::$app->getVersion(),
