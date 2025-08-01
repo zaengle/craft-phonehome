@@ -3,9 +3,11 @@
 namespace zaengle\phonehome\controllers;
 
 use Craft;
+use craft\helpers\App;
 use craft\web\Controller;
 use yii\web\BadRequestHttpException;
 use yii\web\MethodNotAllowedHttpException;
+use yii\web\NotFoundHttpException;
 use yii\web\Response;
 use yii\web\UnauthorizedHttpException;
 use zaengle\phonehome\PhoneHome;
@@ -18,9 +20,9 @@ class ApiController extends Controller
 
     public function actionIndex(): Response
     {
+        $this->checkToken();
         $this->requirePostRequest();
         $this->requireAcceptsJson();
-        $this->checkToken();
 
         $expandPhpInfo = $this->request->getBodyParam('expandPhpInfo', false);
 
@@ -34,11 +36,12 @@ class ApiController extends Controller
      */
     public function actionSchema(): Response
     {
+        $this->checkToken();
+
         if ($this->request->method !== 'GET') {
             throw new MethodNotAllowedHttpException('This endpoint only accepts GET requests');
         }
         $this->requireAcceptsJson();
-        $this->checkToken();
 
         return $this->asJson(PhoneHome::getSchema());
     }
@@ -52,7 +55,11 @@ class ApiController extends Controller
         $token = $headers->get('X-Auth-Token');
 
         if (!$token) {
-            throw new UnauthorizedHttpException('A token is required');
+            if (App::devMode()) {
+                throw new UnauthorizedHttpException('A token is required');
+            }
+            // be a tiny bit more stealthy outside of dev mode
+            throw new NotFoundHttpException();
         }
 
         if ($token !== PhoneHome::$plugin->getSettings()->getToken()) {
