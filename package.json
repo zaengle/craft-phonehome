@@ -28,6 +28,6 @@
     "auto-changelog": "^2.5.0"
   },
   "dependencies": {
-    "vitepress": "^1.6.3"
+    "vitepress": "^1.6.4"
   }
 }
