@@ -1,5 +1,10 @@
 # Release Notes for Craft Phone Home Plugin
 
+## [1.2.2] - 2025-08-13
+
+- fixed: changed custom logging to use monolog's logger levels [1c55d65](https://github.
+  com/zaengle/craft-phonehome/commit/1c55d652403c4ef27ec8b02b466da20295fa86ce)
+
 ## [1.2.1] - 2025-08-13
 
 - fixed: changed logging to use yii's logger levels [5d5f04b](https://github.com/zaengle/craft-phonehome/commit/5d5f04b62a92d0a549ff8e2f77fa0f48a2939273)
