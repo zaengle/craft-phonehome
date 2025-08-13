@@ -1,11 +1,21 @@
 # Release Notes for Craft Phone Home Plugin
 
+## [1.2.0] - 2025-08-01
+
+- build(deps): bump actions/checkout from 2 to 4 [`#8`](https://github.com/zaengle/craft-phonehome/pull/8)
+- 1.1.1 release [`cdb37f4`](https://github.com/zaengle/craft-phonehome/commit/cdb37f4815d6072b8b09e2f4bfe12a453b11c52d)
+- improved: return a 404 for invalid requests if devMode is false [`88586ea`](https://github.com/zaengle/craft-phonehome/commit/88586ea54e39a151358d4a775f59bed1438050a5)
+- buildId to output [#10] [`1e4ca1f`](https://github.com/zaengle/craft-phonehome/commit/1e4ca1f86eff43e7552780ae51e98b2419671011)
+
 ## [1.1.3] - 2025-07-31
-- fixed: update handling of cms release dates [`3e3ebb4`](https://github.com/zaengle/craft-phonehome/commit/3e3ebb41c90c1d4a7f168b670d8b6caab96b5d1b)
+
+- Update release date formatting to use nullable safe operator in Report service [`#9`](https://github.com/zaengle/craft-phonehome/pull/9)
+- Updating version [`1a934e8`](https://github.com/zaengle/craft-phonehome/commit/1a934e834a0ca922ed052982508bcc96230f8ba2)
 
 ## [1.1.2] - 2025-07-29
 
 - Update changelog [`8890417`](https://github.com/zaengle/craft-phonehome/commit/8890417ae5baaca23882595de8e3ea0b7948d7c3)
+- update changelog [`da78ac7`](https://github.com/zaengle/craft-phonehome/commit/da78ac792ef3870fe4439d301cc17735cbb0d905)
 - fixed: ensure modules are objects before calling get_class() on them [`6165f4c`](https://github.com/zaengle/craft-phonehome/commit/6165f4cbe9269d8baee4a0197f52204a2dc6e26f)
 
 ## [1.1.1] - 2025-07-29
@@ -33,6 +43,8 @@
 
 - Initial commit [`490a6d0`](https://github.com/zaengle/craft-phonehome/commit/490a6d0b08758d148f64d2c90720a057d590316b)
 
+[1.2.0]: https://github.com/zaengle/craft-phonehome/compare/1.1.3...1.2.0
+[1.1.3]: https://github.com/zaengle/craft-phonehome/compare/1.1.2...1.1.3
 [1.1.2]: https://github.com/zaengle/craft-phonehome/compare/1.1.1...1.1.2
 [1.1.1]: https://github.com/zaengle/craft-phonehome/compare/1.1.0...1.1.1
 [1.1.0]: https://github.com/zaengle/craft-phonehome/compare/v1.0.0...1.1.0
