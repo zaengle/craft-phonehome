@@ -63,7 +63,7 @@ trait HasOwnLogfile
         Craft::getLogger()->dispatcher->targets[] = new MonologTarget([
             'name' => self::getInstance()->getHandle(),
             'categories' => [self::getInstance()->getHandle()],
-            'level' => Logger::LEVEL_INFO,
+            'level' => LogLevel::INFO,
             'logContext' => false,
             'allowLineBreaks' => true,
             'formatter' => new LineFormatter(
