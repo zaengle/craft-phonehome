@@ -1,6 +1,6 @@
 {
   "name": "phonehome",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Monitor the status of your #CraftCMS projects remotely",
   "homepage": "https://github.com/zaengle/craft-phonehome#readme",
   "main": "docs/index.md",
