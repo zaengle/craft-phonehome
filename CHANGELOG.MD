@@ -1,8 +1,13 @@
 # Release Notes for Craft Phone Home Plugin
 
+## [1.2.4] - 2025-08-21
+
+- fixed: error on date formatting of plugin updates [`096e9ca`](https://github.com/zaengle/craft-phonehome/commit/096e9ca66e7ade18fc3848ff1f8f067942808a51)
+
 ## [1.2.3] - 2025-08-14
 
 - Refactor logging methods and correct trait name casing. [`b3999e7`](https://github.com/zaengle/craft-phonehome/commit/b3999e7f228e607adec8e59faadb85b7c8a0ab99)
+- Release 1.2.3 [`0d209d7`](https://github.com/zaengle/craft-phonehome/commit/0d209d7cc9078cbd15c9003ed0a5b7fba2eafbc6)
 
 ## [1.2.2] - 2025-08-13
 
@@ -58,6 +63,7 @@
 
 - Initial commit [`490a6d0`](https://github.com/zaengle/craft-phonehome/commit/490a6d0b08758d148f64d2c90720a057d590316b)
 
+[1.2.4]: https://github.com/zaengle/craft-phonehome/compare/1.2.3...1.2.4
 [1.2.3]: https://github.com/zaengle/craft-phonehome/compare/1.2.2...1.2.3
 [1.2.2]: https://github.com/zaengle/craft-phonehome/compare/1.2.1...1.2.2
 [1.2.1]: https://github.com/zaengle/craft-phonehome/compare/1.2.0...1.2.1
