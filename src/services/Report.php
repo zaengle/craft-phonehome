@@ -222,7 +222,6 @@ class Report extends Component
                         'package' => 'craftcms/cms',
                         'critical' => $release->critical,
                         'release_date' => $release->date?->format('c'),
-//                        'notes' => $release->notes,
                     ];
                 }
 
@@ -240,8 +239,7 @@ class Report extends Component
                             'version' => $release->version,
                             'package' => $pluginData->packageName,
                             'critical' => $release->critical,
-                            'release_date' => date('c', $release->date),
-//                            'notes' => $release->notes,
+                            'release_date' => $release->date?->format('c'),
                         ];
                     }
 
@@ -249,7 +247,7 @@ class Report extends Component
                 }
             }
         } catch (\Throwable $e) {
-            PhoneHome::warning('Error extracting detailed update info: ' . $e->getMessage());
+            PhoneHome::error('Error extracting detailed update info: ' . $e->getMessage());
         }
 
         PhoneHome::info('Total updates found: ' . count($updates));
