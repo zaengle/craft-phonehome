@@ -118,11 +118,11 @@ class PhoneHome extends BasePlugin
 
     private function attachEventHandlers(): void
     {
-        // Register the built-in queue status check
         Event::on(
             Report::class,
             Report::EVENT_REGISTER_STATUS_CHECKS,
             function(RegisterStatusChecksEvent $event) {
+                // Register the built-in queue status check
                 $event->checks[] = QueueStatusCheck::class;
             }
         );
