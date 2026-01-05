@@ -69,8 +69,10 @@ git push && git push --tags
 
 **Settings Model**: `src/models/Settings.php`
 - `token` - Required authentication token (support env parsing via `App::parseEnv()`)
-- `queueFailedCriticalThreshold` - Failed queue jobs threshold for critical status
-- `queueFailedWarningThreshold` - Failed queue jobs threshold for warning status
+- `queueFailedCriticalThreshold` - Failed queue jobs threshold for critical status (default: 6)
+- `queueFailedWarningThreshold` - Failed queue jobs threshold for warning status (default: 3)
+- `queueDelayedCriticalThreshold` - Delayed queue jobs threshold for critical status (default: 100)
+- `queueDelayedWarningThreshold` - Delayed queue jobs threshold for warning status (default: 50)
 - `additionalEnvKeys` - Array of additional environment variable names to include in meta section
 
 ### Status Checks System
@@ -92,7 +94,10 @@ The plugin uses an event-based architecture for registering status checks, allow
 
 **QueueStatusCheck**: `src/statuschecks/QueueStatusCheck.php` (Built-in check)
 - Monitors Craft queue status (delayed, waiting, failed, reserved jobs)
-- Returns status enum (OK, WARNING, CRITICAL) based on failed job thresholds
+- Returns status enum (OK, WARNING, CRITICAL) based on both failed and delayed job thresholds
+- Checks failed jobs against `queueFailedWarningThreshold` and `queueFailedCriticalThreshold`
+- Checks delayed jobs against `queueDelayedWarningThreshold` and `queueDelayedCriticalThreshold`
+- Combined status: CRITICAL if either check is critical, WARNING if either is warning, otherwise OK
 - Includes current threshold values in meta output for transparency
 - Registered automatically in `PhoneHome::attachEventHandlers()`
 - Demonstrates the status check implementation pattern
@@ -117,7 +122,7 @@ The plugin uses an event-based architecture for registering status checks, allow
 2. Modules/plugins can register their own checks via the same event
 3. When API is called, `Report::getStatusChecks()` triggers the event
 4. All registered check classes have their `check()` method called
-5. Results are collected and returned in the API response under `statusChecks`
+5. Results are collected and returned in the API response under `status_checks`
 
 ### Configuration
 
@@ -134,6 +139,33 @@ The plugin uses semantic versioning with a special constraint: the API schema ve
 - API version is automatically retrieved via `PhoneHome::getApiVersion()` which reads the JSON schema
 - Breaking changes to API response require major version bump
 - New features/non-breaking changes require minor version bump
+
+### Schema Maintenance
+
+**CRITICAL**: The JSON schema in `src/schemas/PhonehomeApi.schema.json` must be kept in sync with the actual API response structure returned by `Report::getInfo()`.
+
+When modifying the API response:
+
+1. **Adding a new field** to the response:
+   - Add the field definition to the `properties` section in the schema
+   - If the field is always present, add it to the `required` array
+   - Bump the schema minor version (e.g., 1.2.0 → 1.3.0)
+
+2. **Removing or renaming a field**:
+   - This is a breaking change - bump the schema major version
+   - Update the schema to remove the old field definition
+   - Document the breaking change in the changelog
+
+3. **Changing field structure** (e.g., changing type or adding nested properties):
+   - If backward compatible (e.g., making a field nullable), bump minor version
+   - If breaking (e.g., changing from string to array), bump major version
+   - Update the field definition in the schema accordingly
+
+4. **Verification workflow**:
+   - After any changes to `Report::getInfo()` or related methods, review the schema
+   - Ensure all returned fields are documented in the schema
+   - Verify the schema version has been bumped appropriately
+   - Test that the API endpoint returns data matching the schema structure
 
 ## Coding Standards
 

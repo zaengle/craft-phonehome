@@ -22,3 +22,55 @@
   suggestEnvVars: true,
   required: true,
 }) }}
+
+<hr>
+
+<h2>{{ "Queue Status Check Settings"|t('phonehome') }}</h2>
+
+{{ forms.autosuggestField({
+  label: "Failed Jobs Warning Threshold"|t('phonehome'),
+  id: 'queueFailedWarningThreshold',
+  name: 'queueFailedWarningThreshold',
+  instructions: "Number of failed queue jobs that will trigger a WARNING status"|t('phonehome'),
+  disabled: 'queueFailedWarningThreshold' in overrides,
+  warning: 'queueFailedWarningThreshold' in overrides ? configWarning('queueFailedWarningThreshold'),
+  value: settings.queueFailedWarningThreshold,
+  errors: settings.getErrors('queueFailedWarningThreshold'),
+  suggestEnvVars: true,
+}) }}
+
+{{ forms.autosuggestField({
+  label: "Failed Jobs Critical Threshold"|t('phonehome'),
+  id: 'queueFailedCriticalThreshold',
+  name: 'queueFailedCriticalThreshold',
+  instructions: "Number of failed queue jobs that will trigger a CRITICAL status"|t('phonehome'),
+  disabled: 'queueFailedCriticalThreshold' in overrides,
+  warning: 'queueFailedCriticalThreshold' in overrides ? configWarning('queueFailedCriticalThreshold'),
+  value: settings.queueFailedCriticalThreshold,
+  errors: settings.getErrors('queueFailedCriticalThreshold'),
+  suggestEnvVars: true,
+}) }}
+
+{{ forms.autosuggestField({
+  label: "Delayed Jobs Warning Threshold"|t('phonehome'),
+  id: 'queueDelayedWarningThreshold',
+  name: 'queueDelayedWarningThreshold',
+  instructions: "Number of delayed queue jobs that will trigger a WARNING status"|t('phonehome'),
+  disabled: 'queueDelayedWarningThreshold' in overrides,
+  warning: 'queueDelayedWarningThreshold' in overrides ? configWarning('queueDelayedWarningThreshold'),
+  value: settings.queueDelayedWarningThreshold,
+  errors: settings.getErrors('queueDelayedWarningThreshold'),
+  suggestEnvVars: true,
+}) }}
+
+{{ forms.autosuggestField({
+  label: "Delayed Jobs Critical Threshold"|t('phonehome'),
+  id: 'queueDelayedCriticalThreshold',
+  name: 'queueDelayedCriticalThreshold',
+  instructions: "Number of delayed queue jobs that will trigger a CRITICAL status"|t('phonehome'),
+  disabled: 'queueDelayedCriticalThreshold' in overrides,
+  warning: 'queueDelayedCriticalThreshold' in overrides ? configWarning('queueDelayedCriticalThreshold'),
+  value: settings.queueDelayedCriticalThreshold,
+  errors: settings.getErrors('queueDelayedCriticalThreshold'),
+  suggestEnvVars: true,
+}) }}

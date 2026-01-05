@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "title": "Phone Home API Response Schema",
   "description": "Schema for the Phone Home API response (output of Report::getInfo() method)",
   "type": "object",
@@ -18,7 +18,8 @@
     "plugins",
     "modules",
     "updates",
-    "meta"
+    "meta",
+    "status_checks"
   ],
   "properties": {
     "build_id": {
@@ -285,6 +286,34 @@
       "description": "Additional metadata from environment variables",
       "additionalProperties": {
         "type": "string"
+      }
+    },
+    "status_checks": {
+      "type": "array",
+      "description": "Results from registered status checks for monitoring application health",
+      "items": {
+        "type": "object",
+        "required": ["name", "status"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The human-readable name of the status check"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["ok", "warning", "critical"],
+            "description": "The status level returned by the check"
+          },
+          "description": {
+            "type": ["string", "null"],
+            "description": "Optional description of what the check monitors"
+          },
+          "meta": {
+            "type": "object",
+            "description": "Optional additional diagnostic information from the check",
+            "additionalProperties": true
+          }
+        }
       }
     }
   }

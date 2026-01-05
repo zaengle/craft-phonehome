@@ -26,6 +26,19 @@ return [
 
 [See the full documentation online](https://craft-phonehome-docs.zaengle.com/) or in the [`docs/`](./docs/index.md) directory of this repository.
 
+## API Schema
+
+The plugin provides a JSON schema that defines the structure of the API response. The schema is located at `src/schemas/PhonehomeApi.schema.json` and follows semantic versioning.
+
+You can retrieve the schema via the API endpoint:
+
+```
+GET /actions/phonehome/api/schema
+X-Auth-Token: your-token-here
+```
+
+**Important for contributors**: When modifying the API response structure in `Report::getInfo()`, you must update the schema file accordingly and bump the schema version following semantic versioning rules. See `CLAUDE.md` for detailed schema maintenance guidelines.
+
 ## Extensibility
 
 ### Custom Status Checks

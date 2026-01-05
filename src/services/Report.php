@@ -53,7 +53,7 @@ class Report extends Component
             'modules' => $this->getModulesInfo(),
             'updates' => $this->getUpdatesInfo(),
             'meta' => $this->getMetaInfo(),
-            'statusChecks' => $this->getStatusChecks(),
+            'status_checks' => $this->getStatusChecks(),
         ];
     }
 

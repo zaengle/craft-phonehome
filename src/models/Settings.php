@@ -11,6 +11,8 @@ use craft\helpers\App;
  * @since     1.0.0
  * @property-read  int $queueFailedCriticalThreshold
  * @property-read int $queueFailedWarningThreshold
+ * @property-read int $queueDelayedCriticalThreshold
+ * @property-read int $queueDelayedWarningThreshold
  */
 class Settings extends Model
 {
@@ -19,6 +21,8 @@ class Settings extends Model
     public ?string $token = null;
     public int|string $queueFailedCriticalThreshold = 6;
     public int|string $queueFailedWarningThreshold = 3;
+    public int|string $queueDelayedCriticalThreshold = 50;
+    public int|string $queueDelayedWarningThreshold = 20;
     public array $additionalEnvKeys = [];
 
     public function rules(): array
@@ -43,5 +47,19 @@ class Settings extends Model
         return is_int($this->queueFailedWarningThreshold)
             ? $this->queueFailedWarningThreshold
             : (int) App::parseEnv($this->queueFailedWarningThreshold);
+    }
+
+    public function getQueueDelayedCriticalThreshold(): int
+    {
+        return is_int($this->queueDelayedCriticalThreshold)
+            ? $this->queueDelayedCriticalThreshold
+            : (int) App::parseEnv($this->queueDelayedCriticalThreshold);
+    }
+
+    public function getQueueDelayedWarningThreshold(): int
+    {
+        return is_int($this->queueDelayedWarningThreshold)
+            ? $this->queueDelayedWarningThreshold
+            : (int) App::parseEnv($this->queueDelayedWarningThreshold);
     }
 }
