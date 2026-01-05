@@ -12,7 +12,9 @@ use craft\models\UpdateRelease;
 use OutOfBoundsException;
 use RequirementsChecker;
 use yii\base\Component;
+use zaengle\phonehome\events\RegisterStatusChecksEvent;
 use zaengle\phonehome\PhoneHome;
+use zaengle\phonehome\statuschecks\StatusCheckInterface;
 
 /**
  * Report service
@@ -28,6 +30,11 @@ use zaengle\phonehome\PhoneHome;
  */
 class Report extends Component
 {
+    /**
+     * @event RegisterStatusChecksEvent The event that is triggered when registering status checks
+     */
+    public const EVENT_REGISTER_STATUS_CHECKS = 'registerStatusChecks';
+
     public function getInfo(bool $expandPhpInfo = false): array
     {
         return [
@@ -46,6 +53,7 @@ class Report extends Component
             'modules' => $this->getModulesInfo(),
             'updates' => $this->getUpdatesInfo(),
             'meta' => $this->getMetaInfo(),
+            'statusChecks' => $this->getStatusChecks(),
         ];
     }
 
@@ -354,5 +362,21 @@ class Report extends Component
             return Craft::$app->edition->name;
         }
         return Craft::$app->getEditionName();
+    }
+
+    private function getStatusChecks(): array
+    {
+        // Create and trigger the event to allow registration of status checks
+        $event = new RegisterStatusChecksEvent();
+        $this->trigger(self::EVENT_REGISTER_STATUS_CHECKS, $event);
+
+        // Collect results from all registered checks
+        $results = [];
+        foreach ($event->checks as $checkClass) {
+            /** @var StatusCheckInterface $checkClass */
+            $results[] = $checkClass::check();
+        }
+
+        return $results;
     }
 }

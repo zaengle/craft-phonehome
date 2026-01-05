@@ -75,19 +75,46 @@ git push && git push --tags
 
 ### Status Checks System
 
+The plugin uses an event-based architecture for registering status checks, allowing plugins and modules to add their own custom health checks.
+
+**Event-Based Registration Pattern**:
+- Status checks are registered via `Report::EVENT_REGISTER_STATUS_CHECKS` event
+- The event handler receives `RegisterStatusChecksEvent` with a `$checks` array
+- Add status check class names (not instances) to the event's `$checks` array
+- Each check class must implement `StatusCheckInterface`
+- The Report service loops through registered checks and calls their static `check()` method
+
 **StatusCheckInterface**: `src/statuschecks/StatusCheckInterface.php`
 - Defines contract for status checks: `getHandle()` and `check()` methods
+- Both methods are static (no instantiation required)
+- `getHandle()` returns a unique identifier for the check
+- `check()` returns a `StatusCheckResult` instance
 
-**QueueStatusCheck**: `src/statuschecks/QueueStatusCheck.php`
+**QueueStatusCheck**: `src/statuschecks/QueueStatusCheck.php` (Built-in check)
 - Monitors Craft queue status (delayed, waiting, failed, reserved jobs)
 - Returns status enum (OK, WARNING, CRITICAL) based on failed job thresholds
-- Accessed via `Report::getStatusChecks()` in the API response
+- Registered automatically in `PhoneHome::attachEventHandlers()`
+- Demonstrates the status check implementation pattern
+
+**RegisterStatusChecksEvent**: `src/events/RegisterStatusChecksEvent.php`
+- Event class with public `$checks` array property
+- Triggered by `Report::getStatusChecks()` before collecting results
+- Allows multiple listeners to register checks
 
 **StatusCheckResult**: `src/models/StatusCheckResult.php`
-- Model for status check results with status enum and meta data
+- Model for status check results
+- Required properties: `handle` (string), `status` (StatusCheck enum)
+- Optional: `meta` (array) for additional check-specific data
 
 **StatusCheck Enum**: `src/enums/StatusCheck.php`
-- Enum values: OK, WARNING, CRITICAL
+- Enum values: `CRITICAL` ('critical'), `WARNING` ('warning'), `OK` ('normal')
+
+**Registration Flow**:
+1. `PhoneHome::attachEventHandlers()` registers built-in checks (QueueStatusCheck)
+2. Modules/plugins can register their own checks via the same event
+3. When API is called, `Report::getStatusChecks()` triggers the event
+4. All registered check classes have their `check()` method called
+5. Results are collected and returned in the API response under `statusChecks`
 
 ### Configuration
 
@@ -122,3 +149,69 @@ The plugin uses semantic versioning with a special constraint: the API schema ve
 - Supports both Craft 4 and Craft 5 (handles CmsEdition enum properly)
 - Uses Laravel collections (`collect()`) for data transformation
 - All sensitive values redacted via `Craft::$app->getSecurity()->redactIfSensitive()`
+
+## Implementing Custom Status Checks
+
+When adding new status checks to the plugin:
+
+1. **Create the check class** in `src/statuschecks/`
+2. **Implement StatusCheckInterface** with static methods
+3. **Define a HANDLE constant** for the check identifier
+4. **Register the check** in `PhoneHome::attachEventHandlers()`
+
+Example implementation:
+
+```php
+// src/statuschecks/DatabaseStatusCheck.php
+namespace zaengle\phonehome\statuschecks;
+
+use Craft;
+use zaengle\phonehome\enums\StatusCheck;
+use zaengle\phonehome\models\StatusCheckResult;
+
+class DatabaseStatusCheck implements StatusCheckInterface
+{
+    public const HANDLE = 'database';
+
+    public static function getHandle(): string
+    {
+        return self::HANDLE;
+    }
+
+    public static function check(): StatusCheckResult
+    {
+        $db = Craft::$app->getDb();
+        $connectionOk = $db->getIsActive();
+
+        return new StatusCheckResult([
+            'handle' => self::HANDLE,
+            'status' => $connectionOk ? StatusCheck::OK : StatusCheck::CRITICAL,
+            'meta' => [
+                'driver' => $db->getDriverName(),
+                'is_active' => $connectionOk,
+            ],
+        ]);
+    }
+}
+```
+
+Then register in `PhoneHome::attachEventHandlers()`:
+
+```php
+Event::on(
+    Report::class,
+    Report::EVENT_REGISTER_STATUS_CHECKS,
+    function(RegisterStatusChecksEvent $event) {
+        $event->checks[] = QueueStatusCheck::class;
+        $event->checks[] = DatabaseStatusCheck::class; // Add new check
+    }
+);
+```
+
+**Best Practices**:
+- Keep checks lightweight and fast (they run on every API call)
+- Use the `meta` array for detailed diagnostic information
+- Return `CRITICAL` for issues that require immediate attention
+- Return `WARNING` for issues that should be monitored
+- Use constants for handle names to avoid typos
+- Make check methods testable by accepting optional dependencies

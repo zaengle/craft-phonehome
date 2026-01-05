@@ -7,7 +7,6 @@ use craft\base\Plugin;
 use craft\log\MonologTarget;
 use Monolog\Formatter\LineFormatter;
 use Psr\Log\LogLevel;
-use yii\log\Logger;
 
 /**
  * Trait HasOwnLogfile
