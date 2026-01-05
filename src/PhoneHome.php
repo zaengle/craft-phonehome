@@ -10,7 +10,7 @@ use Twig\Error\SyntaxError;
 use yii\base\Exception;
 use zaengle\phonehome\models\Settings;
 use zaengle\phonehome\services\Report;
-use zaengle\phonehome\traits\HasOwnLogfile;
+use zaengle\phonehome\traits\HasOwnLogFile;
 
 /**
  * @property  Settings $settings
@@ -19,7 +19,7 @@ use zaengle\phonehome\traits\HasOwnLogfile;
  */
 class PhoneHome extends BasePlugin
 {
-    use HasOwnLogfile;
+    use HasOwnLogFile;
 
     public bool $hasCpSettings = true;
 
