@@ -85,14 +85,15 @@ The plugin uses an event-based architecture for registering status checks, allow
 - The Report service loops through registered checks and calls their static `check()` method
 
 **StatusCheckInterface**: `src/statuschecks/StatusCheckInterface.php`
-- Defines contract for status checks: `getHandle()` and `check()` methods
+- Defines contract for status checks: `getName()` and `check()` methods
 - Both methods are static (no instantiation required)
-- `getHandle()` returns a unique identifier for the check
+- `getName()` returns a human-readable name for the check
 - `check()` returns a `StatusCheckResult` instance
 
 **QueueStatusCheck**: `src/statuschecks/QueueStatusCheck.php` (Built-in check)
 - Monitors Craft queue status (delayed, waiting, failed, reserved jobs)
 - Returns status enum (OK, WARNING, CRITICAL) based on failed job thresholds
+- Includes current threshold values in meta output for transparency
 - Registered automatically in `PhoneHome::attachEventHandlers()`
 - Demonstrates the status check implementation pattern
 
@@ -103,8 +104,10 @@ The plugin uses an event-based architecture for registering status checks, allow
 
 **StatusCheckResult**: `src/models/StatusCheckResult.php`
 - Model for status check results
-- Required properties: `handle` (string), `status` (StatusCheck enum)
-- Optional: `meta` (array) for additional check-specific data
+- Required properties: `name` (string), `status` (StatusCheck enum)
+- Optional properties: `description` (string), `meta` (array) for additional check-specific data
+- The `name` should be human-readable (e.g., "Queue Status", "Database Connection")
+- The `description` provides additional context about what the check monitors
 
 **StatusCheck Enum**: `src/enums/StatusCheck.php`
 - Enum values: `CRITICAL` ('critical'), `WARNING` ('warning'), `OK` ('normal')
@@ -171,11 +174,9 @@ use zaengle\phonehome\models\StatusCheckResult;
 
 class DatabaseStatusCheck implements StatusCheckInterface
 {
-    public const HANDLE = 'database';
-
-    public static function getHandle(): string
+    public static function getName(): string
     {
-        return self::HANDLE;
+        return 'Database Connection';
     }
 
     public static function check(): StatusCheckResult
@@ -184,8 +185,9 @@ class DatabaseStatusCheck implements StatusCheckInterface
         $connectionOk = $db->getIsActive();
 
         return new StatusCheckResult([
-            'handle' => self::HANDLE,
+            'name' => self::getName(),
             'status' => $connectionOk ? StatusCheck::OK : StatusCheck::CRITICAL,
+            'description' => 'Monitors the database connection status',
             'meta' => [
                 'driver' => $db->getDriverName(),
                 'is_active' => $connectionOk,
@@ -210,8 +212,9 @@ Event::on(
 
 **Best Practices**:
 - Keep checks lightweight and fast (they run on every API call)
-- Use the `meta` array for detailed diagnostic information
+- Use human-readable names (e.g., "Queue Status" not "queue")
+- Provide a clear `description` that explains what the check monitors
+- Use the `meta` array for detailed diagnostic information (e.g., current values, thresholds)
 - Return `CRITICAL` for issues that require immediate attention
 - Return `WARNING` for issues that should be monitored
-- Use constants for handle names to avoid typos
 - Make check methods testable by accepting optional dependencies

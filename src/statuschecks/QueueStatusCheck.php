@@ -11,11 +11,14 @@ use zaengle\phonehome\PhoneHome;
 
 class QueueStatusCheck implements StatusCheckInterface
 {
-    public const HANDLE = 'queue';
-
-    public static function getHandle(): string
+    public static function getName(): string
     {
-        return self::HANDLE;
+        return 'Queue Status';
+    }
+
+    public static function getDescription(): string
+    {
+        return 'Monitors the Craft queue for failed, delayed, and reserved jobs';
     }
 
     /**
@@ -27,23 +30,28 @@ class QueueStatusCheck implements StatusCheckInterface
         /** @var QueueInterface $queue */
         $queue = $queue ?? Craft::$app->getQueue();
 
+        /** @var Settings $settings */
+        $settings = PhoneHome::getInstance()->getSettings();
+
         return new StatusCheckResult([
-            'handle' => self::getHandle(),
-            'status' => self::getStatus($queue),
+            'name' => self::getName(),
+            'status' => self::getStatus($queue, $settings),
+            'description' => self::getDescription(),
             'meta' => [
                 'delayed' => $queue->getTotalDelayed(),
                 'waiting' => $queue->getTotalWaiting(),
                 'failed' => $queue->getTotalFailed(),
                 'reserved' => $queue->getTotalReserved(),
+                'thresholds' => [
+                    'failedWarning' => $settings->getQueueFailedWarningThreshold(),
+                    'failedCritical' => $settings->getQueueFailedCriticalThreshold(),
+                ],
             ],
         ]);
     }
 
-    protected static function getStatus(QueueInterface $queue): StatusCheck
+    protected static function getStatus(QueueInterface $queue, Settings $settings): StatusCheck
     {
-        /** @var Settings $settings */
-        $settings = PhoneHome::getInstance()->getSettings();
-
         if ($queue->getTotalFailed() >= $settings->getQueueFailedCriticalThreshold()) {
             return StatusCheck::CRITICAL;
         }

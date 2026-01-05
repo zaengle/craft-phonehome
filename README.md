@@ -55,18 +55,17 @@ use zaengle\phonehome\enums\StatusCheck;
 
 class MyCustomStatusCheck implements StatusCheckInterface
 {
-    public const HANDLE = 'my-custom-check';
-
-    public static function getHandle(): string
+    public static function getName(): string
     {
-        return self::HANDLE;
+        return 'My Custom Check';
     }
 
     public static function check(): StatusCheckResult
     {
         return new StatusCheckResult([
-            'handle' => self::HANDLE,
+            'name' => self::getName(),
             'status' => StatusCheck::OK,
+            'description' => 'Monitors custom application metrics',
             'meta' => [
                 'custom_metric' => 'value',
             ],

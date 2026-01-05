@@ -17,8 +17,8 @@ class Settings extends Model
     // Public Properties
     // =========================================================================
     public ?string $token = null;
-    public int|string $queueFailedCriticalThreshold = 10;
-    public int|string $queueFailedWarningThreshold = 10;
+    public int|string $queueFailedCriticalThreshold = 6;
+    public int|string $queueFailedWarningThreshold = 3;
     public array $additionalEnvKeys = [];
 
     public function rules(): array

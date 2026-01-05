@@ -7,14 +7,16 @@ use zaengle\phonehome\enums\StatusCheck;
 
 class StatusCheckResult extends Model
 {
-    public string $handle;
+    public string $name;
     public StatusCheck $status;
+    public ?string $description = null;
     public array $meta = [];
 
     public function rules(): array
     {
         return [
-            [['handle', 'status'], 'required'],
+            [['name', 'status'], 'required'],
+            [['description'], 'string'],
         ];
     }
 }
