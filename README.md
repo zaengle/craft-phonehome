@@ -39,6 +39,25 @@ X-Auth-Token: your-token-here
 
 **Important for contributors**: When modifying the API response structure in `Report::getInfo()`, you must update the schema file accordingly and bump the schema version following semantic versioning rules. See `CLAUDE.md` for detailed schema maintenance guidelines.
 
+## Configuration
+
+### Additional Environment Variables
+
+You can configure the plugin to include additional environment variables in the API response by setting `additionalEnvKeys` in your `config/phonehome.php`:
+
+```php
+return [
+    'token' => getenv('PHONEHOME_TOKEN'),
+    'additionalEnvKeys' => [
+        'MY_CUSTOM_ENV_VAR',
+        'DEPLOYMENT_ID',
+        'BUILD_NUMBER',
+    ],
+];
+```
+
+These values will be included in the `meta` section of the API response, making it easy to include deployment-specific information alongside the standard system metrics.
+
 ## Extensibility
 
 ### Custom Status Checks
@@ -73,12 +92,17 @@ class MyCustomStatusCheck implements StatusCheckInterface
         return 'My Custom Check';
     }
 
+    public static function getDescription(): string
+    {
+        return 'Monitors custom application metrics';
+    }
+
     public static function check(): StatusCheckResult
     {
         return new StatusCheckResult([
             'name' => self::getName(),
             'status' => StatusCheck::OK,
-            'description' => 'Monitors custom application metrics',
+            'description' => self::getDescription(),
             'meta' => [
                 'custom_metric' => 'value',
             ],

@@ -19,4 +19,18 @@ class StatusCheckResult extends Model
             [['description'], 'string'],
         ];
     }
+
+    /**
+     * Returns the list of fields that should be returned by default by toArray().
+     * Ensures the status enum is serialized as its string value.
+     *
+     * @return array
+     */
+    public function fields(): array
+    {
+        $fields = parent::fields();
+        // Ensure the status enum is serialized as its string value
+        $fields['status'] = fn() => $this->status->value;
+        return $fields;
+    }
 }

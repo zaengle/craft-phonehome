@@ -36,30 +36,33 @@ class Settings extends Model
     {
         return App::parseEnv($this->token);
     }
+
     public function getQueueFailedCriticalThreshold(): int
     {
-        return is_int($this->queueFailedCriticalThreshold)
-            ? $this->queueFailedCriticalThreshold
-            : (int) App::parseEnv($this->queueFailedCriticalThreshold);
+        return max(0, $this->parseIntThreshold($this->queueFailedCriticalThreshold));
     }
+
     public function getQueueFailedWarningThreshold(): int
     {
-        return is_int($this->queueFailedWarningThreshold)
-            ? $this->queueFailedWarningThreshold
-            : (int) App::parseEnv($this->queueFailedWarningThreshold);
+        $warning = max(0, $this->parseIntThreshold($this->queueFailedWarningThreshold));
+        $critical = $this->getQueueFailedCriticalThreshold();
+        return min($warning, $critical);
     }
 
     public function getQueueDelayedCriticalThreshold(): int
     {
-        return is_int($this->queueDelayedCriticalThreshold)
-            ? $this->queueDelayedCriticalThreshold
-            : (int) App::parseEnv($this->queueDelayedCriticalThreshold);
+        return max(0, $this->parseIntThreshold($this->queueDelayedCriticalThreshold));
     }
 
     public function getQueueDelayedWarningThreshold(): int
     {
-        return is_int($this->queueDelayedWarningThreshold)
-            ? $this->queueDelayedWarningThreshold
-            : (int) App::parseEnv($this->queueDelayedWarningThreshold);
+        $warning = max(0, $this->parseIntThreshold($this->queueDelayedWarningThreshold));
+        $critical = $this->getQueueDelayedCriticalThreshold();
+        return min($warning, $critical);
+    }
+
+    private function parseIntThreshold(int|string $value): int
+    {
+        return is_int($value) ? $value : (int) App::parseEnv($value);
     }
 }

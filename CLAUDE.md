@@ -71,8 +71,8 @@ git push && git push --tags
 - `token` - Required authentication token (support env parsing via `App::parseEnv()`)
 - `queueFailedCriticalThreshold` - Failed queue jobs threshold for critical status (default: 6)
 - `queueFailedWarningThreshold` - Failed queue jobs threshold for warning status (default: 3)
-- `queueDelayedCriticalThreshold` - Delayed queue jobs threshold for critical status (default: 100)
-- `queueDelayedWarningThreshold` - Delayed queue jobs threshold for warning status (default: 50)
+- `queueDelayedCriticalThreshold` - Delayed queue jobs threshold for critical status (default: 50)
+- `queueDelayedWarningThreshold` - Delayed queue jobs threshold for warning status (default: 20)
 - `additionalEnvKeys` - Array of additional environment variable names to include in meta section
 
 ### Status Checks System
@@ -115,7 +115,7 @@ The plugin uses an event-based architecture for registering status checks, allow
 - The `description` provides additional context about what the check monitors
 
 **StatusCheck Enum**: `src/enums/StatusCheck.php`
-- Enum values: `CRITICAL` ('critical'), `WARNING` ('warning'), `OK` ('normal')
+- Enum values: `CRITICAL` ('critical'), `WARNING` ('warning'), `OK` ('ok')
 
 **Registration Flow**:
 1. `PhoneHome::attachEventHandlers()` registers built-in checks (QueueStatusCheck)
@@ -211,6 +211,11 @@ class DatabaseStatusCheck implements StatusCheckInterface
         return 'Database Connection';
     }
 
+    public static function getDescription(): string
+    {
+        return 'Monitors the database connection status';
+    }
+
     public static function check(): StatusCheckResult
     {
         $db = Craft::$app->getDb();
@@ -219,7 +224,7 @@ class DatabaseStatusCheck implements StatusCheckInterface
         return new StatusCheckResult([
             'name' => self::getName(),
             'status' => $connectionOk ? StatusCheck::OK : StatusCheck::CRITICAL,
-            'description' => 'Monitors the database connection status',
+            'description' => self::getDescription(),
             'meta' => [
                 'driver' => $db->getDriverName(),
                 'is_active' => $connectionOk,
