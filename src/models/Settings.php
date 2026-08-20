@@ -25,8 +25,8 @@ class Settings extends Model
     public int|string $queueFailedWarningThreshold = 3;
     public int|string $queueDelayedCriticalThreshold = 50;
     public int|string $queueDelayedWarningThreshold = 20;
-    public int|string $queuePendingCriticalThreshold = 250;
-    public int|string $queuePendingWarningThreshold = 100;
+    public int|string $queuePendingCriticalThreshold = 50;
+    public int|string $queuePendingWarningThreshold = 20;
     public array $additionalEnvKeys = [];
 
     public function rules(): array

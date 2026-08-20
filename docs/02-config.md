@@ -33,8 +33,8 @@ The built-in Queue status check reports the Craft queue's failed, delayed, pendi
 | `queueFailedCriticalThreshold` | `6` | Failed jobs that trigger a `CRITICAL` status |
 | `queueDelayedWarningThreshold` | `20` | Delayed jobs that trigger a `WARNING` status |
 | `queueDelayedCriticalThreshold` | `50` | Delayed jobs that trigger a `CRITICAL` status |
-| `queuePendingWarningThreshold` | `100` | Pending (waiting) jobs that trigger a `WARNING` status |
-| `queuePendingCriticalThreshold` | `250` | Pending (waiting) jobs that trigger a `CRITICAL` status |
+| `queuePendingWarningThreshold` | `20` | Pending (waiting) jobs that trigger a `WARNING` status |
+| `queuePendingCriticalThreshold` | `50` | Pending (waiting) jobs that trigger a `CRITICAL` status |
 
 "Pending" is the label Craft's control panel uses for waiting jobs; the count is reported as `meta.waiting` in the API response.
 
@@ -51,8 +51,8 @@ return [
   '*' => [
     'token' => getenv('PHONEHOME_TOKEN'),
     // Only alert on pending jobs once the queue is clearly backed up
-    'queuePendingWarningThreshold' => 250,
-    'queuePendingCriticalThreshold' => 500,
+    'queuePendingWarningThreshold' => 100,
+    'queuePendingCriticalThreshold' => 250,
     // Disable the delayed-jobs check entirely
     'queueDelayedWarningThreshold' => 0,
     'queueDelayedCriticalThreshold' => 0,
