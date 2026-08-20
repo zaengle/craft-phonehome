@@ -19,4 +19,6 @@ return [
 //    'queueFailedCriticalThreshold' => 6,
 //    'queueDelayedWarningThreshold' => 20,
 //    'queueDelayedCriticalThreshold' => 50,
+//    'queuePendingWarningThreshold' => 20,
+//    'queuePendingCriticalThreshold' => 50,
 ];
