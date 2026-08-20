@@ -3,8 +3,11 @@
 ## Unreleased
 
 - added: `queuePendingWarningThreshold` and `queuePendingCriticalThreshold` settings, and the Queue status check now scores the pending (waiting) job count against them ([#121](https://github.com/zaengle/phone-home/issues/121))
-- fixed: `QueueStatusCheck::check()` typehinted `craft\queue\QueueInterface`, but the `getTotal*()` methods it calls are only declared on `craft\queue\Queue`, so a custom queue component implementing the interface would fatal
 - fixed: a queue threshold of `0` (including one bound to an unset env var) pinned the check to `WARNING`/`CRITICAL` permanently; `0` now disables that level
+- fixed: a queue threshold pair with the critical level disabled (`0`) also silently disabled its warning level, because the warning getter clamped unconditionally to the critical value
+- fixed: the Queue status check fataled on sites using a non-Craft `yii\queue` driver, taking down the whole report endpoint, because `getTotalWaiting()` and friends are declared on `craft\queue\Queue` rather than on `QueueInterface`; the driver is now reported in `meta.error` instead
+- fixed: the Queue status check read each job count twice, so a reported status could disagree with the counts reported alongside it
+- fixed: threshold values that aren't a whole number or an `$ENV_VAR` reference are now rejected on save instead of silently parsing to `0` (disabled)
 - improved: documented the queue status check threshold config keys
 
 ## [1.2.4] - 2025-08-21

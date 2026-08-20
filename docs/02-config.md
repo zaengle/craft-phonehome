@@ -41,8 +41,12 @@ The built-in Queue status check reports the Craft queue's failed, delayed, pendi
 Notes:
 
 - Each threshold may be set to an integer or to an env var name (e.g. `'$PHONEHOME_QUEUE_PENDING_CRITICAL'`), the same as `token`.
-- Setting a threshold to `0` disables that level. This also means an env var that is missing or empty disables the level rather than pinning the check to that status.
-- If a warning threshold is higher than its matching critical threshold, it is clamped down to the critical value.
+- Setting a threshold to `0` (or leaving it blank) disables that level. This also means an env var that is missing, empty, or non-numeric disables the level rather than pinning the check to that status.
+- Disabling a critical level does **not** disable its warning level. `queuePendingCriticalThreshold => 0` with `queuePendingWarningThreshold => 20` warns at 20 and never escalates.
+- If a warning threshold is higher than its matching critical threshold, it is clamped down to the critical value — but only when that critical level is enabled.
+- Setting all six to `0` disables queue scoring entirely; the check still reports the counts in `meta`.
+
+The check reads the counts from `craft\queue\Queue`. On a site that has swapped the `queue` component for another `yii\queue` driver those counts aren't available, so the check reports `ok` with an explanatory `meta.error` instead of failing the whole report.
 
 Example:
 
