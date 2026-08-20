@@ -13,6 +13,8 @@ use craft\helpers\App;
  * @property-read int $queueFailedWarningThreshold
  * @property-read int $queueDelayedCriticalThreshold
  * @property-read int $queueDelayedWarningThreshold
+ * @property-read int $queuePendingCriticalThreshold
+ * @property-read int $queuePendingWarningThreshold
  */
 class Settings extends Model
 {
@@ -23,6 +25,8 @@ class Settings extends Model
     public int|string $queueFailedWarningThreshold = 3;
     public int|string $queueDelayedCriticalThreshold = 50;
     public int|string $queueDelayedWarningThreshold = 20;
+    public int|string $queuePendingCriticalThreshold = 250;
+    public int|string $queuePendingWarningThreshold = 100;
     public array $additionalEnvKeys = [];
 
     public function rules(): array
@@ -58,6 +62,18 @@ class Settings extends Model
     {
         $warning = max(0, $this->parseIntThreshold($this->queueDelayedWarningThreshold));
         $critical = $this->getQueueDelayedCriticalThreshold();
+        return min($warning, $critical);
+    }
+
+    public function getQueuePendingCriticalThreshold(): int
+    {
+        return max(0, $this->parseIntThreshold($this->queuePendingCriticalThreshold));
+    }
+
+    public function getQueuePendingWarningThreshold(): int
+    {
+        $warning = max(0, $this->parseIntThreshold($this->queuePendingWarningThreshold));
+        $critical = $this->getQueuePendingCriticalThreshold();
         return min($warning, $critical);
     }
 

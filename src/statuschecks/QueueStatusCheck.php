@@ -3,7 +3,7 @@
 namespace zaengle\phonehome\statuschecks;
 
 use Craft;
-use craft\queue\QueueInterface;
+use craft\queue\Queue;
 use zaengle\phonehome\enums\StatusCheck;
 use zaengle\phonehome\models\Settings;
 use zaengle\phonehome\models\StatusCheckResult;
@@ -18,16 +18,16 @@ class QueueStatusCheck implements StatusCheckInterface
 
     public static function getDescription(): string
     {
-        return 'Monitors the Craft queue for failed and delayed jobs against configurable thresholds';
+        return 'Monitors the Craft queue for failed, delayed, and pending jobs against configurable thresholds';
     }
 
     /**
-     * @param QueueInterface|null $queue
+     * @param Queue|null $queue
      * @return StatusCheckResult
      */
-    public static function check(?QueueInterface $queue = null): StatusCheckResult
+    public static function check(?Queue $queue = null): StatusCheckResult
     {
-        /** @var QueueInterface $queue */
+        /** @var Queue $queue */
         $queue = $queue ?? Craft::$app->getQueue();
 
         /** @var Settings $settings */
@@ -51,52 +51,75 @@ class QueueStatusCheck implements StatusCheckInterface
                         'warning' => $settings->getQueueDelayedWarningThreshold(),
                         'critical' => $settings->getQueueDelayedCriticalThreshold(),
                     ],
+                    // The `pending` thresholds are compared against `meta.waiting`,
+                    // which is what Craft's CP labels "Pending"
+                    'pending' => [
+                        'warning' => $settings->getQueuePendingWarningThreshold(),
+                        'critical' => $settings->getQueuePendingCriticalThreshold(),
+                    ],
                 ],
             ],
         ]);
     }
 
-    protected static function getStatus(QueueInterface $queue, Settings $settings): StatusCheck
+    protected static function getStatus(Queue $queue, Settings $settings): StatusCheck
     {
-        $failedStatus = self::getFailedJobsStatus($queue, $settings);
-        $delayedStatus = self::getDelayedJobsStatus($queue, $settings);
+        $statuses = [
+            self::getFailedJobsStatus($queue, $settings),
+            self::getDelayedJobsStatus($queue, $settings),
+            self::getPendingJobsStatus($queue, $settings),
+        ];
 
         // CRITICAL takes precedence, then WARNING, then OK
-        if ($failedStatus === StatusCheck::CRITICAL || $delayedStatus === StatusCheck::CRITICAL) {
+        if (in_array(StatusCheck::CRITICAL, $statuses, true)) {
             return StatusCheck::CRITICAL;
         }
 
-        if ($failedStatus === StatusCheck::WARNING || $delayedStatus === StatusCheck::WARNING) {
+        if (in_array(StatusCheck::WARNING, $statuses, true)) {
             return StatusCheck::WARNING;
         }
 
         return StatusCheck::OK;
     }
 
-    protected static function getFailedJobsStatus(QueueInterface $queue, Settings $settings): StatusCheck
+    protected static function getFailedJobsStatus(Queue $queue, Settings $settings): StatusCheck
     {
-        $failed = $queue->getTotalFailed();
-
-        if ($failed >= $settings->getQueueFailedCriticalThreshold()) {
-            return StatusCheck::CRITICAL;
-        }
-
-        if ($failed >= $settings->getQueueFailedWarningThreshold()) {
-            return StatusCheck::WARNING;
-        }
-
-        return StatusCheck::OK;
+        return self::compareToThresholds(
+            $queue->getTotalFailed(),
+            $settings->getQueueFailedWarningThreshold(),
+            $settings->getQueueFailedCriticalThreshold(),
+        );
     }
 
-    protected static function getDelayedJobsStatus(QueueInterface $queue, Settings $settings): StatusCheck
+    protected static function getDelayedJobsStatus(Queue $queue, Settings $settings): StatusCheck
     {
-        $delayed = $queue->getTotalDelayed();
+        return self::compareToThresholds(
+            $queue->getTotalDelayed(),
+            $settings->getQueueDelayedWarningThreshold(),
+            $settings->getQueueDelayedCriticalThreshold(),
+        );
+    }
 
-        if ($delayed >= $settings->getQueueDelayedCriticalThreshold()) {
+    protected static function getPendingJobsStatus(Queue $queue, Settings $settings): StatusCheck
+    {
+        return self::compareToThresholds(
+            $queue->getTotalWaiting(),
+            $settings->getQueuePendingWarningThreshold(),
+            $settings->getQueuePendingCriticalThreshold(),
+        );
+    }
+
+    /**
+     * A threshold of 0 disables that level, so an unset env var can't pin the check
+     * to WARNING or CRITICAL permanently.
+     */
+    protected static function compareToThresholds(int $count, int $warning, int $critical): StatusCheck
+    {
+        if ($critical > 0 && $count >= $critical) {
             return StatusCheck::CRITICAL;
         }
 
-        if ($delayed >= $settings->getQueueDelayedWarningThreshold()) {
+        if ($warning > 0 && $count >= $warning) {
             return StatusCheck::WARNING;
         }
 

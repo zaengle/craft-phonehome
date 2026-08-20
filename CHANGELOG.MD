@@ -1,5 +1,12 @@
 # Release Notes for Craft Phone Home Plugin
 
+## Unreleased
+
+- added: `queuePendingWarningThreshold` and `queuePendingCriticalThreshold` settings, and the Queue status check now scores the pending (waiting) job count against them ([#121](https://github.com/zaengle/phone-home/issues/121))
+- fixed: `QueueStatusCheck::check()` typehinted `craft\queue\QueueInterface`, but the `getTotal*()` methods it calls are only declared on `craft\queue\Queue`, so a custom queue component implementing the interface would fatal
+- fixed: a queue threshold of `0` (including one bound to an unset env var) pinned the check to `WARNING`/`CRITICAL` permanently; `0` now disables that level
+- improved: documented the queue status check threshold config keys
+
 ## [1.2.4] - 2025-08-21
 
 - fixed: error on date formatting of plugin updates [`096e9ca`](https://github.com/zaengle/craft-phonehome/commit/096e9ca66e7ade18fc3848ff1f8f067942808a51)
