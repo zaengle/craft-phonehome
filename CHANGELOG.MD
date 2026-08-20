@@ -1,17 +1,34 @@
 # Release Notes for Craft Phone Home Plugin
 
-## Unreleased
+## [1.5.0] - 2026-08-20
 
-- added: `queuePendingWarningThreshold` and `queuePendingCriticalThreshold` settings, and the Queue status check now scores the pending (waiting) job count against them ([#121](https://github.com/zaengle/phone-home/issues/121))
-- fixed: a queue threshold of `0` (including one bound to an unset env var) pinned the check to `WARNING`/`CRITICAL` permanently; `0` now disables that level
-- fixed: a queue threshold pair with the critical level disabled (`0`) also silently disabled its warning level, because the warning getter clamped unconditionally to the critical value
-- fixed: the Queue status check fataled on sites using a non-Craft `yii\queue` driver, taking down the whole report endpoint, because `getTotalWaiting()` and friends are declared on `craft\queue\Queue` rather than on `QueueInterface`; the driver is now reported in `meta.error` instead
-- fixed: the Queue status check read each job count twice, so a reported status could disagree with the counts reported alongside it
-- fixed: threshold values that aren't a whole number or an `$ENV_VAR` reference are now rejected on save instead of silently parsing to `0` (disabled)
-- improved: documented the queue status check threshold config keys
+- Score pending queue jobs against configurable thresholds [`#24`](https://github.com/zaengle/craft-phonehome/pull/24)
+- added: score pending queue jobs against configurable thresholds [`6af2e09`](https://github.com/zaengle/craft-phonehome/commit/6af2e096274feaa1f3638f730f5cbe6b7434108e)
+- fixed: review findings on queue status check [`b79925c`](https://github.com/zaengle/craft-phonehome/commit/b79925ca1c6dfe8897cf1debdc5da4479cb7aedd)
+- changed: lower pending job thresholds to 20/50 [`75a31bc`](https://github.com/zaengle/craft-phonehome/commit/75a31bc1a344c9e18a5857d21b7cab495b925fe0)
+- Revise security policy and reporting guidelines [`ae8b9c9`](https://github.com/zaengle/craft-phonehome/commit/ae8b9c9abc325f5a2cfb32c63ff9c1bee16dfa6e)
+- Add permissions for contents in deploy-docs workflow [`f1b2048`](https://github.com/zaengle/craft-phonehome/commit/f1b204831a25994186b3f75003038183a77204ee)
+- Add permissions to create-release workflow [`763e2c0`](https://github.com/zaengle/craft-phonehome/commit/763e2c04709f1dc0cc7849d8702e29cb7386d8da)
+
+## [1.4.0] - 2026-01-05
+
+- added: configurable status checks [`3d53e61`](https://github.com/zaengle/craft-phonehome/commit/3d53e6174688dd5c8b157c12e96c81d471d9f789)
+- improved: add check for delayed jobs, add queue threshold settings to plugin settings template [`f410fda`](https://github.com/zaengle/craft-phonehome/commit/f410fda8a94815dd9907576d3e43df830b44f36f)
+- added: claude init file [`300d66c`](https://github.com/zaengle/craft-phonehome/commit/300d66ca08b5c00b2d70eb70b7ab82ea8da2864a)
+- chore: self-review fixes [`038e2b3`](https://github.com/zaengle/craft-phonehome/commit/038e2b3a95801e7e1059597c54c04304a8037065)
+- added: check descriptions + threshold info in meta in queue check [`0c128ec`](https://github.com/zaengle/craft-phonehome/commit/0c128eceb7ab46eedef3a7ae172102aa9941dbfa)
+- added: missing events dir [`79c1596`](https://github.com/zaengle/craft-phonehome/commit/79c1596f46bcbc53794864a44474bb81677016f1)
+- fixed: error on date formatting of plugin updates [`36714d9`](https://github.com/zaengle/craft-phonehome/commit/36714d9f793527e415fc24dd965721dc7acc093e)
+
+## [1.3.0] - 2026-01-05
+
+- chore: composer update [`42ee211`](https://github.com/zaengle/craft-phonehome/commit/42ee2117aede97a8072bfc04db7bc7c78ecc1c05)
+- chore: npm update [`007b84b`](https://github.com/zaengle/craft-phonehome/commit/007b84bc93207f5d525fa87251a378b37bded3a6)
+- chore: update GH actions deps [`f67a703`](https://github.com/zaengle/craft-phonehome/commit/f67a70309eb299db71f1d8639ba0e497f1c7c285)
 
 ## [1.2.4] - 2025-08-21
 
+- 1.2.4 release [`6857cee`](https://github.com/zaengle/craft-phonehome/commit/6857cee07c3d9e723f9600782764eef0c7b228ec)
 - fixed: error on date formatting of plugin updates [`096e9ca`](https://github.com/zaengle/craft-phonehome/commit/096e9ca66e7ade18fc3848ff1f8f067942808a51)
 
 ## [1.2.3] - 2025-08-14
@@ -73,6 +90,9 @@
 
 - Initial commit [`490a6d0`](https://github.com/zaengle/craft-phonehome/commit/490a6d0b08758d148f64d2c90720a057d590316b)
 
+[1.5.0]: https://github.com/zaengle/craft-phonehome/compare/1.4.0...1.5.0
+[1.4.0]: https://github.com/zaengle/craft-phonehome/compare/1.3.0...1.4.0
+[1.3.0]: https://github.com/zaengle/craft-phonehome/compare/1.2.4...1.3.0
 [1.2.4]: https://github.com/zaengle/craft-phonehome/compare/1.2.3...1.2.4
 [1.2.3]: https://github.com/zaengle/craft-phonehome/compare/1.2.2...1.2.3
 [1.2.2]: https://github.com/zaengle/craft-phonehome/compare/1.2.1...1.2.2
