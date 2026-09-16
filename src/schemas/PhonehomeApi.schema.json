@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "title": "Phone Home API Response Schema",
   "description": "Schema for the Phone Home API response (output of Report::getInfo() method)",
   "type": "object",
@@ -14,6 +14,7 @@
     "environment",
     "dev_mode",
     "composer_lock_updated",
+    "npm",
     "system",
     "plugins",
     "modules",
@@ -63,6 +64,55 @@
       "type": "string",
       "format": "date-time",
       "description": "The timestamp when the composer.lock file was last updated"
+    },
+    "npm": {
+      "type": ["object", "null"],
+      "description": "Declared npm packages and their resolved versions, or null when no package.json is present",
+      "properties": {
+        "package_manager": {
+          "type": ["string", "null"],
+          "description": "The detected package manager (npm, yarn, or pnpm), or null when no lockfile is present"
+        },
+        "lock_updated": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "The timestamp when the lockfile was last updated, or null when no lockfile is present"
+        },
+        "dependencies": {
+          "type": "object",
+          "description": "Declared production dependencies keyed by package name",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "constraint": {
+                "type": "string",
+                "description": "The declared version constraint from package.json"
+              },
+              "version": {
+                "type": ["string", "null"],
+                "description": "The resolved version from the lockfile, or null when unavailable"
+              }
+            }
+          }
+        },
+        "dev_dependencies": {
+          "type": "object",
+          "description": "Declared development dependencies keyed by package name",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "constraint": {
+                "type": "string",
+                "description": "The declared version constraint from package.json"
+              },
+              "version": {
+                "type": ["string", "null"],
+                "description": "The resolved version from the lockfile, or null when unavailable"
+              }
+            }
+          }
+        }
+      }
     },
     "system": {
       "type": "object",

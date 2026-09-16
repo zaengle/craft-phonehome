@@ -8,6 +8,7 @@ use craft\db\Connection;
 use craft\enums\CmsEdition;
 use craft\helpers\App;
 use craft\helpers\Db;
+use craft\helpers\Json;
 use craft\models\UpdateRelease;
 use OutOfBoundsException;
 use RequirementsChecker;
@@ -26,6 +27,7 @@ use zaengle\phonehome\statuschecks\StatusCheckInterface;
  * @property-read array $metaInfo
  * @property-read array $systemInfo
  * @property-read array $updatesInfo
+ * @property-read array|null $npmInfo
  * @property-read array $info
  */
 class Report extends Component
@@ -48,6 +50,7 @@ class Report extends Component
             'environment' => App::env('CRAFT_ENVIRONMENT') ?? 'unknown',
             'dev_mode' => App::devMode(),
             'composer_lock_updated' => date('c', filemtime(Craft::$app->getComposer()->getLockPath())),
+            'npm' => $this->getNpmInfo(),
             'system' => $this->getSystemInfo($expandPhpInfo),
             'plugins' => $this->getPluginsInfo(),
             'modules' => $this->getModulesInfo(),
@@ -70,6 +73,112 @@ class Report extends Component
         }
 
         return $meta;
+    }
+
+    /**
+     * Reads declared npm packages from package.json and their resolved versions from the lockfile.
+     */
+    public function getNpmInfo(): ?array
+    {
+        try {
+            $root = dirname(Craft::$app->getComposer()->getJsonPath());
+            $packagePath = $root . DIRECTORY_SEPARATOR . 'package.json';
+
+            $packageJson = is_file($packagePath) ? file_get_contents($packagePath) : false;
+
+            if ($packageJson === false) {
+                return null;
+            }
+
+            $package = Json::decode($packageJson);
+
+            [$manager, $lockPath] = $this->getNpmLockfile($root);
+            $resolved = $manager === 'npm' && $lockPath !== null ? $this->getNpmResolvedVersions($lockPath) : [];
+
+            return [
+                'package_manager' => $manager,
+                'lock_updated' => $lockPath ? date('c', filemtime($lockPath)) : null,
+                'dependencies' => (object)$this->mapNpmDependencies($package['dependencies'] ?? [], $resolved),
+                'dev_dependencies' => (object)$this->mapNpmDependencies($package['devDependencies'] ?? [], $resolved),
+            ];
+        } catch (\Throwable $e) {
+            PhoneHome::error('Error collecting npm info: ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * @return array{0: string|null, 1: string|null} The detected package manager and lockfile path.
+     */
+    protected function getNpmLockfile(string $root): array
+    {
+        $lockfiles = [
+            'npm' => 'package-lock.json',
+            'yarn' => 'yarn.lock',
+            'pnpm' => 'pnpm-lock.yaml',
+        ];
+
+        foreach ($lockfiles as $manager => $filename) {
+            $path = $root . DIRECTORY_SEPARATOR . $filename;
+            if (is_file($path)) {
+                return [$manager, $path];
+            }
+        }
+
+        return [null, null];
+    }
+
+    /**
+     * @return array<string, string> Package name => resolved version.
+     */
+    protected function getNpmResolvedVersions(string $lockPath): array
+    {
+        $lockJson = file_get_contents($lockPath);
+
+        if ($lockJson === false) {
+            return [];
+        }
+
+        $lock = Json::decode($lockJson);
+        $resolved = [];
+
+        // lockfileVersion 2/3: resolved versions live under packages keyed by install path.
+        foreach ($lock['packages'] ?? [] as $installPath => $data) {
+            if (!str_starts_with($installPath, 'node_modules/') || !isset($data['version'])) {
+                continue;
+            }
+            $name = substr($installPath, strlen('node_modules/'));
+            if (str_contains($name, '/node_modules/')) {
+                continue;
+            }
+            $resolved[$name] = $data['version'];
+        }
+
+        // lockfileVersion 1 fallback.
+        foreach ($lock['dependencies'] ?? [] as $name => $data) {
+            if (isset($data['version']) && !isset($resolved[$name])) {
+                $resolved[$name] = $data['version'];
+            }
+        }
+
+        return $resolved;
+    }
+
+    /**
+     * @param array<string, string> $declared Package name => declared version constraint.
+     * @param array<string, string> $resolved Package name => resolved version.
+     * @return array<string, array{constraint: string, version: string|null}>
+     */
+    protected function mapNpmDependencies(array $declared, array $resolved): array
+    {
+        return collect($declared)
+            ->mapWithKeys(fn($constraint, $name) => [
+                $name => [
+                    'constraint' => $constraint,
+                    'version' => $resolved[$name] ?? null,
+                ],
+            ])
+            ->toArray();
     }
 
     protected function getSystemInfo(bool $expandPhpInfo = false): array

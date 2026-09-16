@@ -54,6 +54,22 @@ A JSON Schema for the API response is available at `/actions/phonehome/schema`. 
     "environment": "development",
     "dev_mode": false,
     "composer_lock_updated": "2025-07-17T11:30:53-04:00",
+    "npm": {
+        "package_manager": "npm",
+        "lock_updated": "2025-07-17T11:30:53-04:00",
+        "dependencies": {
+            "vitepress": {
+                "constraint": "^1.6.3",
+                "version": "1.6.4"
+            }
+        },
+        "dev_dependencies": {
+            "auto-changelog": {
+                "constraint": "^2.5.0",
+                "version": "2.5.0"
+            }
+        }
+    },
     "system": {
         "php": {
             "name": "PHP",
