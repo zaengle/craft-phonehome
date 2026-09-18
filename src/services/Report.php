@@ -294,7 +294,7 @@ class Report extends Component
     {
         $nonPluginModuleHandles = array_diff(
             array_keys(Craft::$app->modules),
-            array_keys(Craft::$app->plugins->allPluginInfo)
+            array_keys(Craft::$app->getPlugins()->getAllPluginInfo())
         );
 
         $modules = [];
