@@ -8,6 +8,7 @@ use craft\db\Connection;
 use craft\enums\CmsEdition;
 use craft\helpers\App;
 use craft\helpers\Db;
+use craft\helpers\Json;
 use craft\models\UpdateRelease;
 use OutOfBoundsException;
 use RequirementsChecker;
@@ -26,6 +27,7 @@ use zaengle\phonehome\statuschecks\StatusCheckInterface;
  * @property-read array $metaInfo
  * @property-read array $systemInfo
  * @property-read array $updatesInfo
+ * @property-read array|null $npmInfo
  * @property-read array $info
  */
 class Report extends Component
@@ -47,7 +49,8 @@ class Report extends Component
             'ip_address' => Craft::$app->getRequest()->getRemoteIP() ?? 'unknown',
             'environment' => App::env('CRAFT_ENVIRONMENT') ?? 'unknown',
             'dev_mode' => App::devMode(),
-            'composer_lock_updated' => date('c', filemtime(Craft::$app->getComposer()->getLockPath())),
+            'composer_lock_updated' => $this->fileUpdatedAt(Craft::$app->getComposer()->getLockPath()),
+            'npm' => $this->getNpmInfo(),
             'system' => $this->getSystemInfo($expandPhpInfo),
             'plugins' => $this->getPluginsInfo(),
             'modules' => $this->getModulesInfo(),
@@ -70,6 +73,103 @@ class Report extends Component
         }
 
         return $meta;
+    }
+
+    /**
+     * Reads declared npm packages from package.json and their resolved versions from package-lock.json.
+     */
+    protected function getNpmInfo(): ?array
+    {
+        try {
+            $root = Craft::getAlias('@root');
+            $packagePath = $root . DIRECTORY_SEPARATOR . 'package.json';
+
+            $packageJson = is_file($packagePath) ? file_get_contents($packagePath) : false;
+
+            if ($packageJson === false) {
+                return null;
+            }
+
+            $package = Json::decode($packageJson);
+
+            if (!is_array($package)) {
+                return null;
+            }
+
+            $lockPath = $root . DIRECTORY_SEPARATOR . 'package-lock.json';
+            $hasLock = is_file($lockPath);
+            $lock = $hasLock ? $this->getNpmLock($lockPath) : [];
+
+            return [
+                'package_manager' => $hasLock ? 'npm' : null,
+                'lock_updated' => $this->fileUpdatedAt($lockPath),
+                'dependencies' => (object)$this->mapNpmDependencies($package['dependencies'] ?? [], $lock),
+                'dev_dependencies' => (object)$this->mapNpmDependencies($package['devDependencies'] ?? [], $lock),
+            ];
+        } catch (\Throwable $e) {
+            PhoneHome::error('Error collecting npm info: ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * @return array<mixed> The decoded lockfile, or an empty array if it cannot be read.
+     */
+    protected function getNpmLock(string $lockPath): array
+    {
+        try {
+            $lockJson = file_get_contents($lockPath);
+            $lock = $lockJson !== false ? Json::decode($lockJson) : null;
+
+            return is_array($lock) ? $lock : [];
+        } catch (\Throwable $e) {
+            PhoneHome::error('Error parsing package-lock.json: ' . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * @param array<string, string> $declared Package name => declared version constraint.
+     * @param array<mixed> $lock The decoded lockfile.
+     * @return array<string, array{constraint: string, version: string|null}>
+     */
+    protected function mapNpmDependencies(array $declared, array $lock): array
+    {
+        return collect($declared)
+            ->mapWithKeys(fn($constraint, $name) => [
+                $name => [
+                    'constraint' => $this->stripUrlCredentials($constraint),
+                    'version' => $this->stripUrlCredentials(
+                        $lock['packages']['node_modules/' . $name]['version']
+                            ?? $lock['dependencies'][$name]['version']
+                            ?? null
+                    ),
+                ],
+            ])
+            ->toArray();
+    }
+
+    /**
+     * Removes credentials from a URL value, keeping the conventional git@ SSH user.
+     */
+    protected function stripUrlCredentials(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        return preg_replace('#(://)(?!git@)[^/@\s]+@#', '$1', $value) ?? '';
+    }
+
+    protected function fileUpdatedAt(string $path): ?string
+    {
+        if (!is_file($path)) {
+            return null;
+        }
+
+        $mtime = filemtime($path);
+
+        return $mtime !== false ? date('c', $mtime) : null;
     }
 
     protected function getSystemInfo(bool $expandPhpInfo = false): array
@@ -194,7 +294,7 @@ class Report extends Component
     {
         $nonPluginModuleHandles = array_diff(
             array_keys(Craft::$app->modules),
-            array_keys(Craft::$app->plugins->allPluginInfo)
+            array_keys(Craft::$app->getPlugins()->getAllPluginInfo())
         );
 
         $modules = [];

@@ -1,8 +1,24 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "title": "Phone Home API Response Schema",
   "description": "Schema for the Phone Home API response (output of Report::getInfo() method)",
+  "definitions": {
+    "npmPackage": {
+      "type": "object",
+      "required": ["constraint", "version"],
+      "properties": {
+        "constraint": {
+          "type": "string",
+          "description": "The declared version constraint from package.json, with any user:password@ credentials stripped from URL constraints"
+        },
+        "version": {
+          "type": ["string", "null"],
+          "description": "The version resolved from package-lock.json, or null when the lockfile is absent or does not list the package"
+        }
+      }
+    }
+  },
   "type": "object",
   "required": [
     "api_version",
@@ -14,6 +30,7 @@
     "environment",
     "dev_mode",
     "composer_lock_updated",
+    "npm",
     "system",
     "plugins",
     "modules",
@@ -60,9 +77,38 @@
       "description": "Whether dev mode is enabled"
     },
     "composer_lock_updated": {
-      "type": "string",
+      "type": ["string", "null"],
       "format": "date-time",
-      "description": "The timestamp when the composer.lock file was last updated"
+      "description": "The timestamp when the composer.lock file was last updated, or null if it cannot be read"
+    },
+    "npm": {
+      "type": ["object", "null"],
+      "description": "Declared npm packages and their resolved versions, or null when no package.json is present",
+      "properties": {
+        "package_manager": {
+          "type": ["string", "null"],
+          "description": "Always 'npm' when a package-lock.json is present, otherwise null. Only npm lockfiles are parsed; yarn and pnpm projects report null here"
+        },
+        "lock_updated": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "The timestamp when package-lock.json was last updated, or null when it is absent or cannot be read"
+        },
+        "dependencies": {
+          "type": "object",
+          "description": "Declared production dependencies keyed by package name",
+          "additionalProperties": {
+            "$ref": "#/definitions/npmPackage"
+          }
+        },
+        "dev_dependencies": {
+          "type": "object",
+          "description": "Declared development dependencies keyed by package name",
+          "additionalProperties": {
+            "$ref": "#/definitions/npmPackage"
+          }
+        }
+      }
     },
     "system": {
       "type": "object",
