@@ -6,10 +6,11 @@
   "definitions": {
     "npmPackage": {
       "type": "object",
+      "required": ["constraint", "version"],
       "properties": {
         "constraint": {
           "type": "string",
-          "description": "The declared version constraint from package.json, with any credentials stripped from URL constraints"
+          "description": "The declared version constraint from package.json, with any user:password@ credentials stripped from URL constraints"
         },
         "version": {
           "type": ["string", "null"],

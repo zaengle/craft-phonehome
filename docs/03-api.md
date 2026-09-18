@@ -434,3 +434,5 @@ A JSON Schema for the API response is available at `/actions/phonehome/schema`. 
     "meta": []
 }
 ```
+
+Resolved versions in the `npm` section come from `package-lock.json` only. Projects using yarn or pnpm report `package_manager` and `lock_updated` as `null`, with a `null` version for every declared package.

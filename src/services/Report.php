@@ -86,11 +86,15 @@ class Report extends Component
 
             $packageJson = is_file($packagePath) ? file_get_contents($packagePath) : false;
 
-            if ($packageJson === false || trim($packageJson) === '') {
+            if ($packageJson === false) {
                 return null;
             }
 
             $package = Json::decode($packageJson);
+
+            if (!is_array($package)) {
+                return null;
+            }
 
             $lockPath = $root . DIRECTORY_SEPARATOR . 'package-lock.json';
             $hasLock = is_file($lockPath);
@@ -134,17 +138,30 @@ class Report extends Component
         return collect($declared)
             ->mapWithKeys(fn($constraint, $name) => [
                 $name => [
-                    // Strip any credentials embedded in a git URL constraint.
-                    'constraint' => preg_replace('#(://)[^/@\s]+@#', '$1', $constraint) ?? $constraint,
-                    'version' => $lock['packages']['node_modules/' . $name]['version']
-                        ?? $lock['dependencies'][$name]['version']
-                        ?? null,
+                    'constraint' => $this->stripUrlCredentials($constraint),
+                    'version' => $this->stripUrlCredentials(
+                        $lock['packages']['node_modules/' . $name]['version']
+                            ?? $lock['dependencies'][$name]['version']
+                            ?? null
+                    ),
                 ],
             ])
             ->toArray();
     }
 
-    private function fileUpdatedAt(string $path): ?string
+    /**
+     * Removes credentials from a URL value, keeping the conventional git@ SSH user.
+     */
+    protected function stripUrlCredentials(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        return preg_replace('#(://)(?!git@)[^/@\s]+@#', '$1', $value) ?? '';
+    }
+
+    protected function fileUpdatedAt(string $path): ?string
     {
         if (!is_file($path)) {
             return null;
