@@ -49,7 +49,7 @@ class Report extends Component
             'ip_address' => Craft::$app->getRequest()->getRemoteIP() ?? 'unknown',
             'environment' => App::env('CRAFT_ENVIRONMENT') ?? 'unknown',
             'dev_mode' => App::devMode(),
-            'composer_lock_updated' => date('c', filemtime(Craft::$app->getComposer()->getLockPath())),
+            'composer_lock_updated' => $this->fileUpdatedAt(Craft::$app->getComposer()->getLockPath()),
             'npm' => $this->getNpmInfo(),
             'system' => $this->getSystemInfo($expandPhpInfo),
             'plugins' => $this->getPluginsInfo(),
@@ -76,30 +76,31 @@ class Report extends Component
     }
 
     /**
-     * Reads declared npm packages from package.json and their resolved versions from the lockfile.
+     * Reads declared npm packages from package.json and their resolved versions from package-lock.json.
      */
-    public function getNpmInfo(): ?array
+    protected function getNpmInfo(): ?array
     {
         try {
-            $root = dirname(Craft::$app->getComposer()->getJsonPath());
+            $root = Craft::getAlias('@root');
             $packagePath = $root . DIRECTORY_SEPARATOR . 'package.json';
 
             $packageJson = is_file($packagePath) ? file_get_contents($packagePath) : false;
 
-            if ($packageJson === false) {
+            if ($packageJson === false || trim($packageJson) === '') {
                 return null;
             }
 
             $package = Json::decode($packageJson);
 
-            [$manager, $lockPath] = $this->getNpmLockfile($root);
-            $resolved = $manager === 'npm' && $lockPath !== null ? $this->getNpmResolvedVersions($lockPath) : [];
+            $lockPath = $root . DIRECTORY_SEPARATOR . 'package-lock.json';
+            $hasLock = is_file($lockPath);
+            $lock = $hasLock ? $this->getNpmLock($lockPath) : [];
 
             return [
-                'package_manager' => $manager,
-                'lock_updated' => $lockPath ? date('c', filemtime($lockPath)) : null,
-                'dependencies' => (object)$this->mapNpmDependencies($package['dependencies'] ?? [], $resolved),
-                'dev_dependencies' => (object)$this->mapNpmDependencies($package['devDependencies'] ?? [], $resolved),
+                'package_manager' => $hasLock ? 'npm' : null,
+                'lock_updated' => $this->fileUpdatedAt($lockPath),
+                'dependencies' => (object)$this->mapNpmDependencies($package['dependencies'] ?? [], $lock),
+                'dev_dependencies' => (object)$this->mapNpmDependencies($package['devDependencies'] ?? [], $lock),
             ];
         } catch (\Throwable $e) {
             PhoneHome::error('Error collecting npm info: ' . $e->getMessage());
@@ -108,77 +109,50 @@ class Report extends Component
     }
 
     /**
-     * @return array{0: string|null, 1: string|null} The detected package manager and lockfile path.
+     * @return array<mixed> The decoded lockfile, or an empty array if it cannot be read.
      */
-    protected function getNpmLockfile(string $root): array
+    protected function getNpmLock(string $lockPath): array
     {
-        $lockfiles = [
-            'npm' => 'package-lock.json',
-            'yarn' => 'yarn.lock',
-            'pnpm' => 'pnpm-lock.yaml',
-        ];
+        try {
+            $lockJson = file_get_contents($lockPath);
+            $lock = $lockJson !== false ? Json::decode($lockJson) : null;
 
-        foreach ($lockfiles as $manager => $filename) {
-            $path = $root . DIRECTORY_SEPARATOR . $filename;
-            if (is_file($path)) {
-                return [$manager, $path];
-            }
-        }
-
-        return [null, null];
-    }
-
-    /**
-     * @return array<string, string> Package name => resolved version.
-     */
-    protected function getNpmResolvedVersions(string $lockPath): array
-    {
-        $lockJson = file_get_contents($lockPath);
-
-        if ($lockJson === false) {
+            return is_array($lock) ? $lock : [];
+        } catch (\Throwable $e) {
+            PhoneHome::error('Error parsing package-lock.json: ' . $e->getMessage());
             return [];
         }
-
-        $lock = Json::decode($lockJson);
-        $resolved = [];
-
-        // lockfileVersion 2/3: resolved versions live under packages keyed by install path.
-        foreach ($lock['packages'] ?? [] as $installPath => $data) {
-            if (!str_starts_with($installPath, 'node_modules/') || !isset($data['version'])) {
-                continue;
-            }
-            $name = substr($installPath, strlen('node_modules/'));
-            if (str_contains($name, '/node_modules/')) {
-                continue;
-            }
-            $resolved[$name] = $data['version'];
-        }
-
-        // lockfileVersion 1 fallback.
-        foreach ($lock['dependencies'] ?? [] as $name => $data) {
-            if (isset($data['version']) && !isset($resolved[$name])) {
-                $resolved[$name] = $data['version'];
-            }
-        }
-
-        return $resolved;
     }
 
     /**
      * @param array<string, string> $declared Package name => declared version constraint.
-     * @param array<string, string> $resolved Package name => resolved version.
+     * @param array<mixed> $lock The decoded lockfile.
      * @return array<string, array{constraint: string, version: string|null}>
      */
-    protected function mapNpmDependencies(array $declared, array $resolved): array
+    protected function mapNpmDependencies(array $declared, array $lock): array
     {
         return collect($declared)
             ->mapWithKeys(fn($constraint, $name) => [
                 $name => [
-                    'constraint' => $constraint,
-                    'version' => $resolved[$name] ?? null,
+                    // Strip any credentials embedded in a git URL constraint.
+                    'constraint' => preg_replace('#(://)[^/@\s]+@#', '$1', $constraint) ?? $constraint,
+                    'version' => $lock['packages']['node_modules/' . $name]['version']
+                        ?? $lock['dependencies'][$name]['version']
+                        ?? null,
                 ],
             ])
             ->toArray();
+    }
+
+    private function fileUpdatedAt(string $path): ?string
+    {
+        if (!is_file($path)) {
+            return null;
+        }
+
+        $mtime = filemtime($path);
+
+        return $mtime !== false ? date('c', $mtime) : null;
     }
 
     protected function getSystemInfo(bool $expandPhpInfo = false): array
