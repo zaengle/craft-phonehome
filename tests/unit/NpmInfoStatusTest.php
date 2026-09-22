@@ -204,6 +204,56 @@ class NpmInfoStatusTest extends TestCase
     }
 
     /**
+     * An all-numeric package name decodes to an int array key. PHP coerces it back to string at the
+     * closure boundary, since neither this code nor illuminate/collections declares strict_types.
+     */
+    public function testAnAllNumericPackageNameIsResolvedRatherThanThrowing(): void
+    {
+        $this->write('package.json', '{"dependencies":{"123":"^1.0.0","vite":"^6.0.0"}}');
+        $this->write('package-lock.json', json_encode(['packages' => [
+            'node_modules/123' => ['version' => '1.0.1'],
+            'node_modules/vite' => ['version' => '6.0.3'],
+        ]]));
+
+        $info = $this->report->npmInfo();
+
+        self::assertSame(NpmStatus::OK->value, $info['status']);
+        self::assertSame([
+            '123' => ['constraint' => '^1.0.0', 'version' => '1.0.1'],
+            'vite' => ['constraint' => '^6.0.0', 'version' => '6.0.3'],
+        ], (array)$info['dependencies']);
+        self::assertEmpty($this->report->loggedErrors);
+    }
+
+    /**
+     * The section must never take down the rest of the report, even if mapping itself fails. The
+     * fallback must not re-enter the failing path.
+     */
+    public function testAFailureWhileMappingDoesNotEscapeTheSection(): void
+    {
+        $this->writeManifest();
+        $this->write('package-lock.json', '{"packages":{}}');
+
+        $report = new class extends \zaengle\phonehome\tests\support\ReportProbe {
+            protected function mapNpmDependencies(array $declared, ?array $lock): array
+            {
+                if ($declared !== []) {
+                    throw new \RuntimeException('boom');
+                }
+
+                return [];
+            }
+        };
+
+        $info = $report->npmInfo();
+
+        self::assertSame(NpmStatus::UNREADABLE_MANIFEST->value, $info['status']);
+        self::assertEquals(new \stdClass(), $info['dependencies']);
+        self::assertEquals(new \stdClass(), $info['dev_dependencies']);
+        self::assertNotEmpty($report->loggedErrors);
+    }
+
+    /**
      * Empty maps must serialise as {} rather than [], so the consumer sees one shape.
      */
     public function testEmptyMapsSerialiseAsObjects(): void

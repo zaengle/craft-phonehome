@@ -86,6 +86,28 @@ class Report extends Component
      */
     protected function getNpmInfo(): array
     {
+        try {
+            return $this->collectNpmInfo();
+        } catch (\Throwable $e) {
+            // Last resort. This section must never take down the rest of the report, so the fallback is
+            // built literally rather than through npmInfoResult, which could fail the same way again.
+            $this->logError('Error collecting npm info: ' . $e->getMessage());
+
+            return [
+                'status' => NpmStatus::UNREADABLE_MANIFEST->value,
+                'package_manager' => null,
+                'lock_updated' => null,
+                'dependencies' => (object)[],
+                'dev_dependencies' => (object)[],
+            ];
+        }
+    }
+
+    /**
+     * @return array{status: string, package_manager: string|null, lock_updated: string|null, dependencies: object, dev_dependencies: object}
+     */
+    protected function collectNpmInfo(): array
+    {
         // Reading the manifest and reading the lockfile are caught separately, so that a failure after
         // the manifest was read is not reported as a manifest problem.
         try {
