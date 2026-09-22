@@ -101,12 +101,12 @@
         "package_manager": {
           "type": ["string", "null"],
           "enum": ["npm", "yarn", "pnpm", null],
-          "description": "The package manager detected by lockfile presence, or null when no lockfile was found. Only npm lockfiles are parsed; yarn and pnpm are detected and named, but their declared packages report a null version"
+          "description": "The package manager detected by lockfile presence. This is null when no lockfile was found, and also when detection could not be completed, which a status of unreadable_lockfile indicates. Only npm lockfiles are parsed; yarn and pnpm are detected and named, but their declared packages report a null version"
         },
         "lock_updated": {
           "type": ["string", "null"],
           "format": "date-time",
-          "description": "The timestamp when the detected lockfile was last updated, or null when no lockfile was found. This is reported for yarn and pnpm lockfiles too, even though they are not parsed"
+          "description": "The timestamp when the detected lockfile was last updated. This is null when no lockfile was found, and also when detection could not be completed. This is reported for yarn and pnpm lockfiles too, even though they are not parsed"
         },
         "dependencies": {
           "type": "object",

@@ -452,6 +452,11 @@ and `dev_dependencies` are empty objects if nothing could be read.
 | `unsupported_lockfile` | The manifest was read, and a `yarn.lock` or `pnpm-lock.yaml` was found. |
 | `unreadable_lockfile` | The manifest was read, but the lockfile could not be read or parsed. |
 
+When `status` is `unreadable_lockfile`, `package_manager` and `lock_updated` may both be `null`, because the
+failure can happen before detection completes. A `null` `package_manager` therefore means either that no
+lockfile was found or that detection could not be completed, and the `status` field is what distinguishes
+the two.
+
 Resolved versions come from `package-lock.json` only, and both the v1 layout and the v2 and v3 layouts are
 supported. A `yarn.lock` or a `pnpm-lock.yaml` is detected and named in `package_manager`, but it is not
 parsed, so every declared package reports a `version` of `null` in that case. If a project carries both a
