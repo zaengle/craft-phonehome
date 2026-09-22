@@ -151,6 +151,9 @@ class Report extends Component
 
     /**
      * Removes credentials from a URL value, keeping the conventional git@ SSH user.
+     *
+     * The character class runs to the last @ in the authority so that a password containing an @
+     * is stripped in full. A / still bounds the match, so it cannot run into the path.
      */
     protected function stripUrlCredentials(?string $value): ?string
     {
@@ -158,7 +161,7 @@ class Report extends Component
             return null;
         }
 
-        return preg_replace('#(://)(?!git@)[^/@\s]+@#', '$1', $value) ?? '';
+        return preg_replace('#(://)(?!git@)[^/\s]+@#', '$1', $value) ?? null;
     }
 
     protected function fileUpdatedAt(string $path): ?string
