@@ -9,12 +9,12 @@
       "required": ["constraint", "version"],
       "properties": {
         "constraint": {
-          "type": "string",
-          "description": "The declared version constraint from package.json, with any user:password@ credentials stripped from URL constraints"
+          "type": ["string", "null"],
+          "description": "The declared version constraint from package.json, with any user:password@ credentials stripped from URL constraints, or null if the value could not be processed"
         },
         "version": {
           "type": ["string", "null"],
-          "description": "The version resolved from package-lock.json, or null when the lockfile is absent or does not list the package"
+          "description": "The version resolved from package-lock.json, with any user:password@ credentials stripped, or null when the lockfile is absent, is not parsed, or does not list the package"
         }
       }
     }
@@ -82,17 +82,31 @@
       "description": "The timestamp when the composer.lock file was last updated, or null if it cannot be read"
     },
     "npm": {
-      "type": ["object", "null"],
-      "description": "Declared npm packages and their resolved versions, or null when no package.json is present",
+      "type": "object",
+      "description": "Declared npm packages and their resolved versions. Always an object, so that a site with no npm dependencies can be told apart from a site whose dependencies could not be read; see status",
+      "required": ["status", "package_manager", "lock_updated", "dependencies", "dev_dependencies"],
       "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "no_manifest",
+            "unreadable_manifest",
+            "no_lockfile",
+            "unsupported_lockfile",
+            "unreadable_lockfile"
+          ],
+          "description": "The outcome of collecting this section. 'ok' means package.json was read and package-lock.json was read and parsed. 'no_manifest' means there is no package.json, so the site genuinely has no npm dependencies. 'unreadable_manifest' means a package.json is present but could not be read or parsed. 'no_lockfile' means the manifest was read but no lockfile of any kind was found. 'unsupported_lockfile' means the manifest was read and a yarn.lock or pnpm-lock.yaml was found, which is named but not parsed. 'unreadable_lockfile' means the manifest was read but the package-lock.json present could not be parsed"
+        },
         "package_manager": {
           "type": ["string", "null"],
-          "description": "Always 'npm' when a package-lock.json is present, otherwise null. Only npm lockfiles are parsed; yarn and pnpm projects report null here"
+          "enum": ["npm", "yarn", "pnpm", null],
+          "description": "The package manager detected by lockfile presence, or null when no lockfile was found. Only npm lockfiles are parsed; yarn and pnpm are detected and named, but their declared packages report a null version"
         },
         "lock_updated": {
           "type": ["string", "null"],
           "format": "date-time",
-          "description": "The timestamp when package-lock.json was last updated, or null when it is absent or cannot be read"
+          "description": "The timestamp when the detected lockfile was last updated, or null when no lockfile was found. This is reported for yarn and pnpm lockfiles too, even though they are not parsed"
         },
         "dependencies": {
           "type": "object",
