@@ -189,6 +189,21 @@ class NpmInfoStatusTest extends TestCase
     }
 
     /**
+     * An unresolvable project root is a manifest-phase failure, not a lockfile one. Craft::getAlias
+     * throws rather than returning false, so this exercises the manifest catch.
+     */
+    public function testAnUnresolvableProjectRootIsReportedAsAnUnreadableManifest(): void
+    {
+        Craft::setAlias('@root', null);
+
+        $info = $this->report->npmInfo();
+
+        self::assertSame(NpmStatus::UNREADABLE_MANIFEST->value, $info['status']);
+        self::assertNotEmpty($this->report->loggedErrors);
+        self::assertStringContainsString('manifest', $this->report->loggedErrors[0]);
+    }
+
+    /**
      * Empty maps must serialise as {} rather than [], so the consumer sees one shape.
      */
     public function testEmptyMapsSerialiseAsObjects(): void

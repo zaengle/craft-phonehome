@@ -447,10 +447,10 @@ and `dev_dependencies` are empty objects if nothing could be read.
 | --- | --- |
 | `ok` | The `package.json` was read, and the `package-lock.json` was read and parsed. |
 | `no_manifest` | There is no `package.json`, so the site genuinely has no npm dependencies. |
-| `unreadable_manifest` | A `package.json` is present, but it could not be read or parsed. |
+| `unreadable_manifest` | The manifest could not be read or parsed, either because a `package.json` is present but unreadable or because the project root could not be resolved. |
 | `no_lockfile` | The manifest was read, but no lockfile of any kind was found. |
 | `unsupported_lockfile` | The manifest was read, and a `yarn.lock` or `pnpm-lock.yaml` was found. |
-| `unreadable_lockfile` | The manifest was read, but the `package-lock.json` present could not be parsed. |
+| `unreadable_lockfile` | The manifest was read, but the lockfile could not be read or parsed. |
 
 Resolved versions come from `package-lock.json` only, and both the v1 layout and the v2 and v3 layouts are
 supported. A `yarn.lock` or a `pnpm-lock.yaml` is detected and named in `package_manager`, but it is not

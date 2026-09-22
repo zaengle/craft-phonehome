@@ -86,6 +86,8 @@ class Report extends Component
      */
     protected function getNpmInfo(): array
     {
+        // Reading the manifest and reading the lockfile are caught separately, so that a failure after
+        // the manifest was read is not reported as a manifest problem.
         try {
             $root = Craft::getAlias('@root');
             $packagePath = $root . DIRECTORY_SEPARATOR . 'package.json';
@@ -101,11 +103,16 @@ class Report extends Component
                 $this->logError('Unable to read or parse package.json.');
                 return $this->npmInfoResult(NpmStatus::UNREADABLE_MANIFEST);
             }
+        } catch (\Throwable $e) {
+            $this->logError('Error reading the npm manifest: ' . $e->getMessage());
+            return $this->npmInfoResult(NpmStatus::UNREADABLE_MANIFEST);
+        }
 
-            // A non-array value here is malformed, and must cost only that map rather than the section.
-            $declared = is_array($package['dependencies'] ?? null) ? $package['dependencies'] : [];
-            $devDeclared = is_array($package['devDependencies'] ?? null) ? $package['devDependencies'] : [];
+        // A non-array value here is malformed, and must cost only that map rather than the section.
+        $declared = is_array($package['dependencies'] ?? null) ? $package['dependencies'] : [];
+        $devDeclared = is_array($package['devDependencies'] ?? null) ? $package['devDependencies'] : [];
 
+        try {
             $npmLockPath = $root . DIRECTORY_SEPARATOR . 'package-lock.json';
             $yarnLockPath = $root . DIRECTORY_SEPARATOR . 'yarn.lock';
             $pnpmLockPath = $root . DIRECTORY_SEPARATOR . 'pnpm-lock.yaml';
@@ -147,8 +154,10 @@ class Report extends Component
                 $lock,
             );
         } catch (\Throwable $e) {
-            $this->logError('Error collecting npm info: ' . $e->getMessage());
-            return $this->npmInfoResult(NpmStatus::UNREADABLE_MANIFEST);
+            // The manifest was read, so the declared packages are still reported. Only their resolved
+            // versions are lost.
+            $this->logError('Error reading the npm lockfile: ' . $e->getMessage());
+            return $this->npmInfoResult(NpmStatus::UNREADABLE_LOCKFILE, null, null, $declared, $devDeclared);
         }
     }
 
