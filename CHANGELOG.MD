@@ -1,5 +1,11 @@
 # Release Notes for Craft Phone Home Plugin
 
+## [1.7.0] - 2026-09-23
+
+- Promote develop to main for 1.7.0 [`#30`](https://github.com/zaengle/craft-phonehome/pull/30)
+- fixed: locate package.json instead of assuming it sits at @root [`#29`](https://github.com/zaengle/craft-phonehome/pull/29)
+- fixed: stage the changelog when bumping the version [`0f59563`](https://github.com/zaengle/craft-phonehome/commit/0f595633fb73c4b06d28556c287fb52e5a651978)
+
 ## [1.6.0] - 2026-09-23
 
 - Promote develop to main to bring CI onto main [`#28`](https://github.com/zaengle/craft-phonehome/pull/28)
@@ -13,6 +19,7 @@
 - added: run tests, static analysis and coding standards on pull requests [`9e4a36d`](https://github.com/zaengle/craft-phonehome/commit/9e4a36dea1ee1e2f2168579eb468785748020a60)
 - fixed: do not report a post-manifest failure as a manifest problem [`084cee2`](https://github.com/zaengle/craft-phonehome/commit/084cee266ad0177b030fb46e040775f996354ba2)
 - fixed: apply credential strip to resolved versions [`16fd411`](https://github.com/zaengle/craft-phonehome/commit/16fd4117a1eb66a268233cb31be8606d512bfc90)
+- Release 1.6.0 [`9bec8d5`](https://github.com/zaengle/craft-phonehome/commit/9bec8d5705f4e991385f8504afd9dd132f7c7209)
 - fixed: pin workflow actions to full commit SHAs [`b47c31c`](https://github.com/zaengle/craft-phonehome/commit/b47c31c408d9894e3be06e3a40b49192316c1634)
 - fixed: document that a null package_manager can also mean detection failed [`1d6c656`](https://github.com/zaengle/craft-phonehome/commit/1d6c65633b46ad3283585639b4a08de0504a9fdd)
 - fixed: drop PHP 8.2 from the test matrix [`e58d63d`](https://github.com/zaengle/craft-phonehome/commit/e58d63d749c066f92b433a273fc00bbce992348a)
@@ -111,6 +118,7 @@
 
 - Initial commit [`490a6d0`](https://github.com/zaengle/craft-phonehome/commit/490a6d0b08758d148f64d2c90720a057d590316b)
 
+[1.7.0]: https://github.com/zaengle/craft-phonehome/compare/1.6.0...1.7.0
 [1.6.0]: https://github.com/zaengle/craft-phonehome/compare/1.5.0...1.6.0
 [1.5.0]: https://github.com/zaengle/craft-phonehome/compare/1.4.0...1.5.0
 [1.4.0]: https://github.com/zaengle/craft-phonehome/compare/1.3.0...1.4.0
