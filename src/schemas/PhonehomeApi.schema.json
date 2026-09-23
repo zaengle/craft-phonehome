@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "title": "Phone Home API Response Schema",
   "description": "Schema for the Phone Home API response (output of Report::getInfo() method)",
   "definitions": {
@@ -84,7 +84,7 @@
     "npm": {
       "type": "object",
       "description": "Declared npm packages and their resolved versions. Always an object, so that a site with no npm dependencies can be told apart from a site whose dependencies could not be read; see status",
-      "required": ["status", "package_manager", "lock_updated", "dependencies", "dev_dependencies"],
+      "required": ["status", "package_manager", "manifest_path", "lock_updated", "dependencies", "dev_dependencies"],
       "properties": {
         "status": {
           "type": "string",
@@ -96,12 +96,16 @@
             "unsupported_lockfile",
             "unreadable_lockfile"
           ],
-          "description": "The outcome of collecting this section. 'ok' means package.json was read and package-lock.json was read and parsed. 'no_manifest' means there is no package.json, so the site genuinely has no npm dependencies. 'unreadable_manifest' means the manifest could not be read or parsed, either because a package.json is present but unreadable or because the project root could not be resolved. 'no_lockfile' means the manifest was read but no lockfile of any kind was found. 'unsupported_lockfile' means the manifest was read and a yarn.lock or pnpm-lock.yaml was found, which is named but not parsed. 'unreadable_lockfile' means the manifest was read but the lockfile could not be read or parsed"
+          "description": "The outcome of collecting this section. 'ok' means package.json was read and package-lock.json was read and parsed. 'no_manifest' means no package.json was found at any searched location, so the site genuinely has no npm dependencies. 'unreadable_manifest' means the manifest could not be read or parsed, either because a package.json is present but unreadable or because the project root could not be resolved. 'no_lockfile' means the manifest was read but no lockfile of any kind was found. 'unsupported_lockfile' means the manifest was read and a yarn.lock or pnpm-lock.yaml was found, which is named but not parsed. 'unreadable_lockfile' means the manifest was read but the lockfile could not be read or parsed"
         },
         "package_manager": {
           "type": ["string", "null"],
           "enum": ["npm", "yarn", "pnpm", null],
           "description": "The package manager detected by lockfile presence. This is null when no lockfile was found, and also when detection could not be completed, which a status of unreadable_lockfile indicates. Only npm lockfiles are parsed; yarn and pnpm are detected and named, but their declared packages report a null version"
+        },
+        "manifest_path": {
+          "type": ["string", "null"],
+          "description": "Where the package.json that was read lives, expressed relative to Craft's @root, for example '.' or '..'. Null when no manifest was found. Always relative, so no absolute server path is disclosed. This makes a misplaced manifest diagnosable from the report itself"
         },
         "lock_updated": {
           "type": ["string", "null"],

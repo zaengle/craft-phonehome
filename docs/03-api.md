@@ -57,6 +57,7 @@ A JSON Schema for the API response is available at `/actions/phonehome/schema`. 
     "npm": {
         "status": "ok",
         "package_manager": "npm",
+        "manifest_path": ".",
         "lock_updated": "2025-07-17T11:30:53-04:00",
         "dependencies": {
             "vitepress": {
@@ -457,6 +458,28 @@ failure can happen before detection completes. A `null` `package_manager` theref
 lockfile was found or that detection could not be completed, and the `status` field is what distinguishes
 the two.
 
+#### Where the manifest is looked for
+
+The npm manifest is not always beside `composer.json`. A common Craft convention puts the CMS in a
+subdirectory, so `@root` resolves one level below the repository root where `package.json` and
+`package-lock.json` actually live. The lookup order is:
+
+1. The `npmPath` setting, when set. It may be absolute, or relative to `@root`. If no `package.json`
+   is found there the section reports `no_manifest` rather than falling back to the search, so that a
+   misconfigured path cannot look like it is working.
+2. Otherwise `@root` itself, then each parent directory in turn, up to three levels above `@root`.
+   The search stops at the first `package.json` found and never walks above the filesystem root.
+
+The lockfile is always resolved from the same directory as the manifest that was read, never from
+`@root`, so a manifest found by walking up is not paired with an unrelated lockfile.
+
+`manifest_path` reports where the manifest was actually read from, relative to `@root`, for example
+`.` or `..`. It is always relative, so no absolute server path is disclosed, and it makes a
+misplaced or misconfigured manifest diagnosable from the report itself without shell access.
+
+Only the one located `package.json` is read. A monorepo using npm workspaces therefore reports that
+manifest only, and packages declared in its workspace manifests are not included.
+
 Resolved versions come from `package-lock.json` only, and both the v1 layout and the v2 and v3 layouts are
 supported. A `yarn.lock` or a `pnpm-lock.yaml` is detected and named in `package_manager`, but it is not
 parsed, so every declared package reports a `version` of `null` in that case. If a project carries both a
@@ -464,9 +487,6 @@ parsed, so every declared package reports a `version` of `null` in that case. If
 
 Only top-level installs are matched, so a nested transitive copy of a package cannot clobber the version of
 a package the project declares itself.
-
-Only the root `package.json` is read. A monorepo using npm workspaces therefore reports the root manifest
-only, and packages declared in its workspace manifests are not included.
 
 Credentials are stripped from URL constraints and resolved versions, so a `https://user:password@host/...`
 value is reported as `https://host/...`. The conventional `git@` SSH user is preserved.

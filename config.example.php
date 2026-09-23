@@ -10,6 +10,10 @@
 use craft\helpers\App;
 return [
 //    'token' => App::env('PHONEHOME_TOKEN') ?: null,
+//    // Directory holding the npm package.json, if it is not at or above @root.
+//    // Absolute, or relative to @root. Leave unset to search @root and up to three parents.
+//    'npmPath' => 'frontend',
+//
 //    'additionalEnvKeys' => [
 //        'MY_CUSTOM_ENV_KEY',
 //    ],
