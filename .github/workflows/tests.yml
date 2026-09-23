@@ -17,8 +17,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The committed lockfile resolves craftcms/cms 5.x, which requires PHP ^8.2.
-        php: ['8.2', '8.3', '8.4']
+        # The committed lockfile cannot install below 8.3: craftcms/cms 5.x requires ^8.2, but
+        # lcobucci/clock pulls the floor up to ~8.3. composer.json itself still allows >=8.1.
+        php: ['8.3', '8.4']
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
