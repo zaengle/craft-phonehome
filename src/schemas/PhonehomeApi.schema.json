@@ -1,8 +1,24 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "title": "Phone Home API Response Schema",
   "description": "Schema for the Phone Home API response (output of Report::getInfo() method)",
+  "definitions": {
+    "npmPackage": {
+      "type": "object",
+      "required": ["constraint", "version"],
+      "properties": {
+        "constraint": {
+          "type": ["string", "null"],
+          "description": "The declared version constraint from package.json, with any user:password@ credentials stripped from URL constraints, or null if the value could not be processed"
+        },
+        "version": {
+          "type": ["string", "null"],
+          "description": "The version resolved from package-lock.json, with any user:password@ credentials stripped, or null when the lockfile is absent, is not parsed, or does not list the package"
+        }
+      }
+    }
+  },
   "type": "object",
   "required": [
     "api_version",
@@ -14,6 +30,7 @@
     "environment",
     "dev_mode",
     "composer_lock_updated",
+    "npm",
     "system",
     "plugins",
     "modules",
@@ -60,9 +77,52 @@
       "description": "Whether dev mode is enabled"
     },
     "composer_lock_updated": {
-      "type": "string",
+      "type": ["string", "null"],
       "format": "date-time",
-      "description": "The timestamp when the composer.lock file was last updated"
+      "description": "The timestamp when the composer.lock file was last updated, or null if it cannot be read"
+    },
+    "npm": {
+      "type": "object",
+      "description": "Declared npm packages and their resolved versions. Always an object, so that a site with no npm dependencies can be told apart from a site whose dependencies could not be read; see status",
+      "required": ["status", "package_manager", "lock_updated", "dependencies", "dev_dependencies"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "no_manifest",
+            "unreadable_manifest",
+            "no_lockfile",
+            "unsupported_lockfile",
+            "unreadable_lockfile"
+          ],
+          "description": "The outcome of collecting this section. 'ok' means package.json was read and package-lock.json was read and parsed. 'no_manifest' means there is no package.json, so the site genuinely has no npm dependencies. 'unreadable_manifest' means the manifest could not be read or parsed, either because a package.json is present but unreadable or because the project root could not be resolved. 'no_lockfile' means the manifest was read but no lockfile of any kind was found. 'unsupported_lockfile' means the manifest was read and a yarn.lock or pnpm-lock.yaml was found, which is named but not parsed. 'unreadable_lockfile' means the manifest was read but the lockfile could not be read or parsed"
+        },
+        "package_manager": {
+          "type": ["string", "null"],
+          "enum": ["npm", "yarn", "pnpm", null],
+          "description": "The package manager detected by lockfile presence. This is null when no lockfile was found, and also when detection could not be completed, which a status of unreadable_lockfile indicates. Only npm lockfiles are parsed; yarn and pnpm are detected and named, but their declared packages report a null version"
+        },
+        "lock_updated": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "The timestamp when the detected lockfile was last updated. This is null when no lockfile was found, and also when detection could not be completed. This is reported for yarn and pnpm lockfiles too, even though they are not parsed"
+        },
+        "dependencies": {
+          "type": "object",
+          "description": "Declared production dependencies keyed by package name",
+          "additionalProperties": {
+            "$ref": "#/definitions/npmPackage"
+          }
+        },
+        "dev_dependencies": {
+          "type": "object",
+          "description": "Declared development dependencies keyed by package name",
+          "additionalProperties": {
+            "$ref": "#/definitions/npmPackage"
+          }
+        }
+      }
     },
     "system": {
       "type": "object",

@@ -54,6 +54,23 @@ A JSON Schema for the API response is available at `/actions/phonehome/schema`. 
     "environment": "development",
     "dev_mode": false,
     "composer_lock_updated": "2025-07-17T11:30:53-04:00",
+    "npm": {
+        "status": "ok",
+        "package_manager": "npm",
+        "lock_updated": "2025-07-17T11:30:53-04:00",
+        "dependencies": {
+            "vitepress": {
+                "constraint": "^1.6.3",
+                "version": "1.6.4"
+            }
+        },
+        "dev_dependencies": {
+            "auto-changelog": {
+                "constraint": "^2.5.0",
+                "version": "2.5.0"
+            }
+        }
+    },
     "system": {
         "php": {
             "name": "PHP",
@@ -418,3 +435,38 @@ A JSON Schema for the API response is available at `/actions/phonehome/schema`. 
     "meta": []
 }
 ```
+
+### The npm section
+
+The `npm` section is always an object, never `null`. Its `status` field says how collection went, so that a
+site which genuinely has no npm dependencies can be told apart from a site whose dependencies could not be
+read. When a status other than `ok` is reported, the remaining fields are still present, and `dependencies`
+and `dev_dependencies` are empty objects if nothing could be read.
+
+| `status` | Meaning |
+| --- | --- |
+| `ok` | The `package.json` was read, and the `package-lock.json` was read and parsed. |
+| `no_manifest` | There is no `package.json`, so the site genuinely has no npm dependencies. |
+| `unreadable_manifest` | The manifest could not be read or parsed, either because a `package.json` is present but unreadable or because the project root could not be resolved. |
+| `no_lockfile` | The manifest was read, but no lockfile of any kind was found. |
+| `unsupported_lockfile` | The manifest was read, and a `yarn.lock` or `pnpm-lock.yaml` was found. |
+| `unreadable_lockfile` | The manifest was read, but the lockfile could not be read or parsed. |
+
+When `status` is `unreadable_lockfile`, `package_manager` and `lock_updated` may both be `null`, because the
+failure can happen before detection completes. A `null` `package_manager` therefore means either that no
+lockfile was found or that detection could not be completed, and the `status` field is what distinguishes
+the two.
+
+Resolved versions come from `package-lock.json` only, and both the v1 layout and the v2 and v3 layouts are
+supported. A `yarn.lock` or a `pnpm-lock.yaml` is detected and named in `package_manager`, but it is not
+parsed, so every declared package reports a `version` of `null` in that case. If a project carries both a
+`package-lock.json` and another lockfile, the `package-lock.json` is the one that is parsed.
+
+Only top-level installs are matched, so a nested transitive copy of a package cannot clobber the version of
+a package the project declares itself.
+
+Only the root `package.json` is read. A monorepo using npm workspaces therefore reports the root manifest
+only, and packages declared in its workspace manifests are not included.
+
+Credentials are stripped from URL constraints and resolved versions, so a `https://user:password@host/...`
+value is reported as `https://host/...`. The conventional `git@` SSH user is preserved.
