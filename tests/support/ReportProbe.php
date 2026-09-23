@@ -13,6 +13,9 @@ class ReportProbe extends Report
     /** @var string[] */
     public array $loggedErrors = [];
 
+    /** Stands in for the npmPath plugin setting, which needs a booted Craft application to read. */
+    public ?string $npmPath = null;
+
     /**
      * @param array<mixed> $declared
      * @param array<mixed>|null $lock
@@ -34,6 +37,11 @@ class ReportProbe extends Report
     public function npmInfo(): array
     {
         return $this->getNpmInfo();
+    }
+
+    protected function getConfiguredNpmPath(): ?string
+    {
+        return $this->npmPath;
     }
 
     protected function logError(string $message): void

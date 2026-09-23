@@ -98,3 +98,15 @@
   errors: settings.getErrors('queuePendingCriticalThreshold'),
   suggestEnvVars: true,
 }) }}
+
+{{ forms.autosuggestField({
+  label: "npm Manifest Path"|t('phonehome'),
+  id: 'npmPath',
+  name: 'npmPath',
+  instructions: "Directory holding the npm `package.json`, if it is not at or above the project root. Absolute, or relative to the project root. Leave blank to search the project root and up to three parent directories."|t('phonehome'),
+  disabled: 'npmPath' in overrides,
+  warning: 'npmPath' in overrides ? configWarning('npmPath'),
+  value: settings.npmPath,
+  errors: settings.getErrors('npmPath'),
+  suggestEnvVars: true,
+}) }}

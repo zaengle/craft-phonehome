@@ -12,7 +12,7 @@
     "docs:build": "VITE_PHONEHOME_PLUGIN_VERSION=$(npm run version:get) vitepress build docs",
     "docs:serve": "VITE_PHONEHOME_PLUGIN_VERSION=$(npm run version:get) vitepress serve docs",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "version:bump": "auto-changelog -p && git add CHANGELOG.md",
+    "version:bump": "auto-changelog -p && git add CHANGELOG.MD",
     "version:get": "echo $npm_package_version"
   },
   "bugs": {
