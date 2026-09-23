@@ -38,6 +38,12 @@ class Report extends Component
      */
     public const EVENT_REGISTER_STATUS_CHECKS = 'registerStatusChecks';
 
+    /**
+     * @var int How many parent directories above @root to search for package.json. One level covers
+     * the common Craft layout where the CMS lives in a subdirectory of the repository.
+     */
+    public const NPM_MANIFEST_SEARCH_DEPTH = 3;
+
     public function getInfo(bool $expandPhpInfo = false): array
     {
         return [
@@ -82,7 +88,7 @@ class Report extends Component
      * Always returns an object so that a consumer can tell a site with no npm dependencies apart from
      * a site whose dependencies could not be read. The `status` field says which of those it is.
      *
-     * @return array{status: string, package_manager: string|null, lock_updated: string|null, dependencies: object, dev_dependencies: object}
+     * @return array{status: string, package_manager: string|null, manifest_path: string|null, lock_updated: string|null, dependencies: object, dev_dependencies: object}
      */
     protected function getNpmInfo(): array
     {
@@ -96,6 +102,7 @@ class Report extends Component
             return [
                 'status' => NpmStatus::UNREADABLE_MANIFEST->value,
                 'package_manager' => null,
+                'manifest_path' => null,
                 'lock_updated' => null,
                 'dependencies' => (object)[],
                 'dev_dependencies' => (object)[],
@@ -104,30 +111,38 @@ class Report extends Component
     }
 
     /**
-     * @return array{status: string, package_manager: string|null, lock_updated: string|null, dependencies: object, dev_dependencies: object}
+     * @return array{status: string, package_manager: string|null, manifest_path: string|null, lock_updated: string|null, dependencies: object, dev_dependencies: object}
      */
     protected function collectNpmInfo(): array
     {
         // Reading the manifest and reading the lockfile are caught separately, so that a failure after
         // the manifest was read is not reported as a manifest problem.
         try {
-            $root = Craft::getAlias('@root');
-            $packagePath = $root . DIRECTORY_SEPARATOR . 'package.json';
+            $manifest = $this->findNpmManifest();
+        } catch (\Throwable $e) {
+            $this->logError('Error locating the npm manifest: ' . $e->getMessage());
+            return $this->npmInfoResult(NpmStatus::UNREADABLE_MANIFEST);
+        }
 
-            if (!is_file($packagePath)) {
-                return $this->npmInfoResult(NpmStatus::NO_MANIFEST);
-            }
+        if ($manifest === null) {
+            return $this->npmInfoResult(NpmStatus::NO_MANIFEST);
+        }
 
-            $packageJson = file_get_contents($packagePath);
+        // Held outside the try so that an unreadable manifest can still report where it was found,
+        // which is the whole point of the field.
+        [$manifestDir, $manifestPath] = $manifest;
+
+        try {
+            $packageJson = file_get_contents($manifestDir . DIRECTORY_SEPARATOR . 'package.json');
             $package = $packageJson !== false ? Json::decode($packageJson) : null;
 
             if (!is_array($package)) {
-                $this->logError('Unable to read or parse package.json.');
-                return $this->npmInfoResult(NpmStatus::UNREADABLE_MANIFEST);
+                $this->logError("Unable to read or parse package.json at '$manifestPath'.");
+                return $this->npmInfoResult(NpmStatus::UNREADABLE_MANIFEST, null, $manifestPath);
             }
         } catch (\Throwable $e) {
-            $this->logError('Error reading the npm manifest: ' . $e->getMessage());
-            return $this->npmInfoResult(NpmStatus::UNREADABLE_MANIFEST);
+            $this->logError("Error reading package.json at '$manifestPath': " . $e->getMessage());
+            return $this->npmInfoResult(NpmStatus::UNREADABLE_MANIFEST, null, $manifestPath);
         }
 
         // A non-array value here is malformed, and must cost only that map rather than the section.
@@ -135,9 +150,11 @@ class Report extends Component
         $devDeclared = is_array($package['devDependencies'] ?? null) ? $package['devDependencies'] : [];
 
         try {
-            $npmLockPath = $root . DIRECTORY_SEPARATOR . 'package-lock.json';
-            $yarnLockPath = $root . DIRECTORY_SEPARATOR . 'yarn.lock';
-            $pnpmLockPath = $root . DIRECTORY_SEPARATOR . 'pnpm-lock.yaml';
+            // Lockfiles are resolved from the manifest directory, never from @root, so that a manifest
+            // found by walking up is not paired with a lockfile from somewhere else.
+            $npmLockPath = $manifestDir . DIRECTORY_SEPARATOR . 'package-lock.json';
+            $yarnLockPath = $manifestDir . DIRECTORY_SEPARATOR . 'yarn.lock';
+            $pnpmLockPath = $manifestDir . DIRECTORY_SEPARATOR . 'pnpm-lock.yaml';
 
             // Only npm lockfiles are parsed. yarn and pnpm lockfiles are detected and named so that the
             // distinction is expressible downstream, but their declared packages report a null version.
@@ -145,6 +162,7 @@ class Report extends Component
                 return $this->npmInfoResult(
                     NpmStatus::UNSUPPORTED_LOCKFILE,
                     'yarn',
+                    $manifestPath,
                     $this->fileUpdatedAt($yarnLockPath),
                     $declared,
                     $devDeclared,
@@ -155,6 +173,7 @@ class Report extends Component
                 return $this->npmInfoResult(
                     NpmStatus::UNSUPPORTED_LOCKFILE,
                     'pnpm',
+                    $manifestPath,
                     $this->fileUpdatedAt($pnpmLockPath),
                     $declared,
                     $devDeclared,
@@ -162,7 +181,7 @@ class Report extends Component
             }
 
             if (!is_file($npmLockPath)) {
-                return $this->npmInfoResult(NpmStatus::NO_LOCKFILE, null, null, $declared, $devDeclared);
+                return $this->npmInfoResult(NpmStatus::NO_LOCKFILE, null, $manifestPath, null, $declared, $devDeclared);
             }
 
             $lock = $this->getNpmLock($npmLockPath);
@@ -170,6 +189,7 @@ class Report extends Component
             return $this->npmInfoResult(
                 $lock === null ? NpmStatus::UNREADABLE_LOCKFILE : NpmStatus::OK,
                 'npm',
+                $manifestPath,
                 $this->fileUpdatedAt($npmLockPath),
                 $declared,
                 $devDeclared,
@@ -179,7 +199,7 @@ class Report extends Component
             // The manifest was read, so the declared packages are still reported. Only their resolved
             // versions are lost.
             $this->logError('Error reading the npm lockfile: ' . $e->getMessage());
-            return $this->npmInfoResult(NpmStatus::UNREADABLE_LOCKFILE, null, null, $declared, $devDeclared);
+            return $this->npmInfoResult(NpmStatus::UNREADABLE_LOCKFILE, null, $manifestPath, null, $declared, $devDeclared);
         }
     }
 
@@ -189,11 +209,12 @@ class Report extends Component
      * @param array<mixed> $declared Declared production dependencies from package.json.
      * @param array<mixed> $devDeclared Declared development dependencies from package.json.
      * @param array<mixed>|null $lock The decoded npm lockfile, or null when there is nothing to resolve against.
-     * @return array{status: string, package_manager: string|null, lock_updated: string|null, dependencies: object, dev_dependencies: object}
+     * @return array{status: string, package_manager: string|null, manifest_path: string|null, lock_updated: string|null, dependencies: object, dev_dependencies: object}
      */
     protected function npmInfoResult(
         NpmStatus $status,
         ?string $packageManager = null,
+        ?string $manifestPath = null,
         ?string $lockUpdated = null,
         array $declared = [],
         array $devDeclared = [],
@@ -202,10 +223,97 @@ class Report extends Component
         return [
             'status' => $status->value,
             'package_manager' => $packageManager,
+            'manifest_path' => $manifestPath,
             'lock_updated' => $lockUpdated,
             'dependencies' => (object)$this->mapNpmDependencies($declared, $lock),
             'dev_dependencies' => (object)$this->mapNpmDependencies($devDeclared, $lock),
         ];
+    }
+
+    /**
+     * Locates the directory holding package.json.
+     *
+     * The npm manifest is not always beside composer.json. A common Craft convention puts the Craft
+     * install in a subdirectory, so `@root` resolves one level below the repository root where the
+     * manifest and lockfile actually live. Assuming `@root` reports such a site as having no npm
+     * dependencies at all, which is indistinguishable from a site that genuinely has none.
+     *
+     * The configured npmPath wins when set. Otherwise `@root` is checked first, then each parent up
+     * to NPM_MANIFEST_SEARCH_DEPTH levels, stopping at the first manifest found and never walking
+     * above the filesystem root.
+     *
+     * @return array{0: string, 1: string}|null The absolute directory, and its path relative to @root.
+     */
+    protected function findNpmManifest(): ?array
+    {
+        $root = Craft::getAlias('@root');
+
+        if (!is_string($root)) {
+            return null;
+        }
+
+        $root = rtrim($root, DIRECTORY_SEPARATOR);
+        $configured = $this->getConfiguredNpmPath();
+
+        if ($configured !== null) {
+            // A relative setting is resolved against @root, so that config is portable between
+            // environments whose absolute paths differ.
+            $dir = str_starts_with($configured, DIRECTORY_SEPARATOR)
+                ? rtrim($configured, DIRECTORY_SEPARATOR)
+                : $root . DIRECTORY_SEPARATOR . trim($configured, DIRECTORY_SEPARATOR);
+
+            if (!is_file($dir . DIRECTORY_SEPARATOR . 'package.json')) {
+                $this->logError("No package.json at the configured npmPath '$configured'.");
+                return null;
+            }
+
+            return [$dir, $this->pathRelativeToRoot($root, $dir)];
+        }
+
+        $dir = $root;
+
+        for ($level = 0; $level <= self::NPM_MANIFEST_SEARCH_DEPTH; $level++) {
+            if (is_file($dir . DIRECTORY_SEPARATOR . 'package.json')) {
+                return [$dir, $this->pathRelativeToRoot($root, $dir)];
+            }
+
+            $parent = dirname($dir);
+
+            // dirname() is its own parent at the filesystem root.
+            if ($parent === $dir) {
+                break;
+            }
+
+            $dir = $parent;
+        }
+
+        return null;
+    }
+
+    /**
+     * Expresses a directory relative to @root, so that the report never discloses an absolute
+     * server path. Returns '.', '..', '../..' and so on.
+     */
+    protected function pathRelativeToRoot(string $root, string $dir): string
+    {
+        $root = realpath($root) ?: $root;
+        $dir = realpath($dir) ?: $dir;
+
+        if ($root === $dir) {
+            return '.';
+        }
+
+        $rootParts = explode(DIRECTORY_SEPARATOR, trim($root, DIRECTORY_SEPARATOR));
+        $dirParts = explode(DIRECTORY_SEPARATOR, trim($dir, DIRECTORY_SEPARATOR));
+
+        while ($rootParts !== [] && $dirParts !== [] && $rootParts[0] === $dirParts[0]) {
+            array_shift($rootParts);
+            array_shift($dirParts);
+        }
+
+        $path = implode('/', array_merge(array_fill(0, count($rootParts), '..'), $dirParts));
+
+        return $path === '' ? '.' : $path;
     }
 
     /**
@@ -275,6 +383,15 @@ class Report extends Component
         return preg_replace('#(://)(?!git@)[^/\s]+@#', '$1', $value) ?? null;
     }
 
+
+    /**
+     * Returns the configured npm manifest directory. Overridable so that the lookup can be exercised
+     * without a booted Craft application.
+     */
+    protected function getConfiguredNpmPath(): ?string
+    {
+        return PhoneHome::$plugin->getSettings()->getNpmPath();
+    }
 
     /**
      * Logs an error. Overridable so that collection failures can be observed in tests.

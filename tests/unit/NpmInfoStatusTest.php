@@ -65,6 +65,8 @@ class NpmInfoStatusTest extends TestCase
 
         self::assertSame(NpmStatus::UNREADABLE_MANIFEST->value, $info['status']);
         self::assertNull($info['package_manager']);
+        // The location is still known and still worth reporting: that is what makes it diagnosable.
+        self::assertSame('.', $info['manifest_path']);
         self::assertNotEmpty($this->report->loggedErrors);
     }
 

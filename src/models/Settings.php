@@ -10,6 +10,7 @@ use craft\helpers\App;
  * PhoneHome Plugin Settings Model
  *
  * @since     1.0.0
+ * @property-read string|null $npmPath
  * @property-read  int $queueFailedCriticalThreshold
  * @property-read int $queueFailedWarningThreshold
  * @property-read int $queueDelayedCriticalThreshold
@@ -42,6 +43,13 @@ class Settings extends Model
     public int|string $queuePendingCriticalThreshold = 50;
     public int|string $queuePendingWarningThreshold = 20;
     public array $additionalEnvKeys = [];
+
+    /**
+     * @var string|null Directory holding the npm package.json, when it is not where the plugin would
+     * otherwise find it. Absolute, or relative to `@root`. Accepts an `$ENV_VAR_NAME` reference.
+     * Leave null to search for the manifest instead.
+     */
+    public ?string $npmPath = null;
 
     public function rules(): array
     {
@@ -86,6 +94,20 @@ class Settings extends Model
     public function getToken(): ?string
     {
         return App::parseEnv($this->token);
+    }
+
+    /**
+     * Returns the configured npm manifest directory, or null when it should be searched for.
+     *
+     * A blank value means the same as null, so that clearing the field in the CP, or pointing it at
+     * an env var that is unset in this environment, falls back to the search rather than resolving
+     * to the project root by accident.
+     */
+    public function getNpmPath(): ?string
+    {
+        $value = App::parseEnv($this->npmPath);
+
+        return is_string($value) && trim($value) !== '' ? trim($value) : null;
     }
 
     public function getQueueFailedCriticalThreshold(): int
