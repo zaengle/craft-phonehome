@@ -1,0 +1,10 @@
+{% extends "poc/_layout" %}
+{% set title = "About" %}
+{% block content %}
+    <h1 data-testid="page-heading">About</h1>
+    <p>A second template so the manifest names more than one page.</p>
+    <ul>
+        <li>The layout is shared with every other page.</li>
+        <li>A change to the layout should therefore show up on all of them.</li>
+    </ul>
+{% endblock %}

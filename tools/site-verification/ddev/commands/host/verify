@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+
+## Description: Capture or compare site-verification baselines inside the Playwright container
+## Usage: verify <setup|capture|compare> [run-id]
+## Example: "ddev verify setup", then "ddev verify capture qa-001" and "ddev verify compare qa-001"
+
+set -euo pipefail
+
+MODE="${1:-}"
+RUN_ID="${2:-local}"
+
+if [ "$MODE" != "setup" ] && [ "$MODE" != "capture" ] && [ "$MODE" != "compare" ]; then
+    echo "Usage: ddev verify <setup|capture|compare> [run-id]" >&2
+    exit 1
+fi
+
+CONTAINER="ddev-${DDEV_SITENAME}-playwright"
+
+# Dependencies are installed inside the container rather than on the host, so the browser, the OS
+# that renders the screenshots and the packages that drive them all come from the same image.
+if [ "$MODE" = "setup" ]; then
+    docker exec "$CONTAINER" npm install
+    exit 0
+fi
+
+# Read the site's own token rather than asking for one, so the two halves of a pair cannot be run
+# against different credentials by accident.
+TOKEN="$(grep '^PHONEHOME_TOKEN=' "${DDEV_APPROOT}/.env" | cut -d= -f2-)"
+
+if [ -z "$TOKEN" ]; then
+    echo "PHONEHOME_TOKEN is not set in ${DDEV_APPROOT}/.env" >&2
+    exit 1
+fi
+
+docker exec \
+    -e "PHV_TOKEN=${TOKEN}" \
+    -e "PHV_RUN_ID=${RUN_ID}" \
+    "$CONTAINER" \
+    npm run --silent "$MODE"

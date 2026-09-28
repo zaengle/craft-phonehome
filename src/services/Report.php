@@ -44,6 +44,19 @@ class Report extends Component
      */
     public const NPM_MANIFEST_SEARCH_DEPTH = 3;
 
+    /**
+     * @var string[] InnoDB row formats subject to the 8126-byte row-size limit. A table in one of
+     * these can reject a column that DYNAMIC would accept, which surfaces only as a failed Craft
+     * migration part-way through an upgrade -- by which point the database is half-migrated.
+     */
+    public const AT_RISK_ROW_FORMATS = ['Compact', 'Redundant'];
+
+    /**
+     * @var int How many at-risk table names to report. The count is always exact; the list is
+     * bounded so a large legacy database cannot bloat every report it sends.
+     */
+    public const MAX_ROW_FORMAT_TABLES = 25;
+
     public function getInfo(bool $expandPhpInfo = false): array
     {
         return [
@@ -64,6 +77,7 @@ class Report extends Component
             'updates' => $this->getUpdatesInfo(),
             'meta' => $this->getMetaInfo(),
             'status_checks' => $this->getStatusChecks(),
+            'verification' => PhoneHome::$plugin->verification->getManifest(),
         ];
     }
 
@@ -467,6 +481,81 @@ class Report extends Component
         return [
             'name' => $db->getDriverLabel(),
             'version' => App::normalizeVersion($db->getSchema()->getServerVersion()),
+            'row_formats' => $this->getRowFormatInfo(),
+        ];
+    }
+
+    /**
+     * Reports how many InnoDB tables use a row format that can block a future Craft migration.
+     *
+     * Returns null when the question does not apply or could not be answered. A consumer must not
+     * read that as "checked, nothing at risk" -- on PostgreSQL the concept does not exist, and a
+     * failed lookup is an absence of information rather than a clean result.
+     *
+     * @return array{at_risk: int, unknown: int, total: int, formats: array<string, int>, tables: list<string>}|null
+     */
+    protected function getRowFormatInfo(): ?array
+    {
+        $db = Craft::$app->getDb();
+
+        if (!$db->getIsMysql()) {
+            return null;
+        }
+
+        try {
+            $rows = $db->createCommand(
+                'select table_name as tableName, row_format as rowFormat
+                 from information_schema.tables
+                 where table_schema = database() and engine = :engine',
+                [':engine' => 'InnoDB'],
+            )->queryAll();
+        } catch (\Throwable $e) {
+            $this->logError('Error reading table row formats: ' . $e->getMessage());
+
+            return null;
+        }
+
+        return $this->summariseRowFormats($rows);
+    }
+
+    /**
+     * @param array<array<string, mixed>> $rows
+     * @return array{at_risk: int, unknown: int, total: int, formats: array<string, int>, tables: list<string>}
+     */
+    public function summariseRowFormats(array $rows): array
+    {
+        $formats = [];
+        $atRiskTables = [];
+
+        foreach ($rows as $row) {
+            $format = is_string($row['rowFormat'] ?? null) && $row['rowFormat'] !== '' ? $row['rowFormat'] : 'Unknown';
+            $formats[$format] = ($formats[$format] ?? 0) + 1;
+
+            if (in_array($format, self::AT_RISK_ROW_FORMATS, true) && is_string($row['tableName'] ?? null)) {
+                $atRiskTables[] = $row['tableName'];
+            }
+        }
+
+        // Counted from the format tally rather than from the collected names, so a row with an
+        // unreadable table name still registers as at risk instead of quietly lowering the count.
+        $atRisk = 0;
+
+        foreach (self::AT_RISK_ROW_FORMATS as $format) {
+            $atRisk += $formats[$format] ?? 0;
+        }
+
+        ksort($formats);
+        sort($atRiskTables);
+
+        return [
+            'at_risk' => $atRisk,
+            // Reported separately rather than folded into at_risk or ignored. A census that could
+            // not read any row format is not a census showing nothing at risk, and the difference
+            // is invisible if the only number is a zero.
+            'unknown' => $formats['Unknown'] ?? 0,
+            'total' => count($rows),
+            'formats' => $formats,
+            'tables' => array_slice($atRiskTables, 0, self::MAX_ROW_FORMAT_TABLES),
         ];
     }
 

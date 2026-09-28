@@ -1,19 +1,28 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "title": "Phone Home API Response Schema",
   "description": "Schema for the Phone Home API response (output of Report::getInfo() method)",
   "definitions": {
     "npmPackage": {
       "type": "object",
-      "required": ["constraint", "version"],
+      "required": [
+        "constraint",
+        "version"
+      ],
       "properties": {
         "constraint": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "The declared version constraint from package.json, with any user:password@ credentials stripped from URL constraints, or null if the value could not be processed"
         },
         "version": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "The version resolved from package-lock.json, with any user:password@ credentials stripped, or null when the lockfile is absent, is not parsed, or does not list the package"
         }
       }
@@ -77,14 +86,24 @@
       "description": "Whether dev mode is enabled"
     },
     "composer_lock_updated": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "format": "date-time",
       "description": "The timestamp when the composer.lock file was last updated, or null if it cannot be read"
     },
     "npm": {
       "type": "object",
       "description": "Declared npm packages and their resolved versions. Always an object, so that a site with no npm dependencies can be told apart from a site whose dependencies could not be read; see status",
-      "required": ["status", "package_manager", "manifest_path", "lock_updated", "dependencies", "dev_dependencies"],
+      "required": [
+        "status",
+        "package_manager",
+        "manifest_path",
+        "lock_updated",
+        "dependencies",
+        "dev_dependencies"
+      ],
       "properties": {
         "status": {
           "type": "string",
@@ -99,16 +118,30 @@
           "description": "The outcome of collecting this section. 'ok' means package.json was read and package-lock.json was read and parsed. 'no_manifest' means no package.json was found at any searched location, so the site genuinely has no npm dependencies. 'unreadable_manifest' means the manifest could not be read or parsed, either because a package.json is present but unreadable or because the project root could not be resolved. 'no_lockfile' means the manifest was read but no lockfile of any kind was found. 'unsupported_lockfile' means the manifest was read and a yarn.lock or pnpm-lock.yaml was found, which is named but not parsed. 'unreadable_lockfile' means the manifest was read but the lockfile could not be read or parsed"
         },
         "package_manager": {
-          "type": ["string", "null"],
-          "enum": ["npm", "yarn", "pnpm", null],
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "npm",
+            "yarn",
+            "pnpm",
+            null
+          ],
           "description": "The package manager detected by lockfile presence. This is null when no lockfile was found, and also when detection could not be completed, which a status of unreadable_lockfile indicates. Only npm lockfiles are parsed; yarn and pnpm are detected and named, but their declared packages report a null version"
         },
         "manifest_path": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Where the package.json that was read lives, expressed relative to Craft's @root, for example '.' or '..'. Null when no manifest was found. Always relative, so no absolute server path is disclosed. This makes a misplaced manifest diagnosable from the report itself"
         },
         "lock_updated": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "format": "date-time",
           "description": "The timestamp when the detected lockfile was last updated. This is null when no lockfile was found, and also when detection could not be completed. This is reported for yarn and pnpm lockfiles too, even though they are not parsed"
         },
@@ -144,7 +177,10 @@
               "description": "The PHP version"
             },
             "info": {
-              "type": ["object", "null"],
+              "type": [
+                "object",
+                "null"
+              ],
               "description": "Detailed PHP information (only included if expandPhpInfo is true)"
             }
           }
@@ -172,6 +208,41 @@
             "version": {
               "type": "string",
               "description": "The database server version"
+            },
+            "row_formats": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "description": "InnoDB row-format census. Null when the question does not apply (PostgreSQL) or could not be answered, which must not be read as nothing being at risk.",
+              "properties": {
+                "at_risk": {
+                  "type": "integer",
+                  "description": "Tables in a row format subject to the 8126-byte row-size limit, which can block a future Craft migration"
+                },
+                "unknown": {
+                  "type": "integer",
+                  "description": "Tables whose row format could not be read; a census of these is not a census showing nothing at risk"
+                },
+                "total": {
+                  "type": "integer",
+                  "description": "InnoDB tables inspected"
+                },
+                "formats": {
+                  "type": "object",
+                  "description": "Table count per row format",
+                  "additionalProperties": {
+                    "type": "integer"
+                  }
+                },
+                "tables": {
+                  "type": "array",
+                  "description": "At-risk table names, bounded; at_risk carries the exact count",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
             }
           }
         },
@@ -318,11 +389,17 @@
             "description": "The name of the package with an available update"
           },
           "abandoned": {
-            "type": ["boolean", "null"],
+            "type": [
+              "boolean",
+              "null"
+            ],
             "description": "Whether the package is abandoned"
           },
           "status": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "The status of the package"
           },
           "version": {
@@ -346,7 +423,10 @@
       }
     },
     "meta": {
-      "type": ["object", "array"],
+      "type": [
+        "object",
+        "array"
+      ],
       "description": "Additional metadata from environment variables",
       "additionalProperties": {
         "type": "string"
@@ -357,7 +437,10 @@
       "description": "Results from registered status checks for monitoring application health",
       "items": {
         "type": "object",
-        "required": ["name", "status"],
+        "required": [
+          "name",
+          "status"
+        ],
         "properties": {
           "name": {
             "type": "string",
@@ -365,17 +448,95 @@
           },
           "status": {
             "type": "string",
-            "enum": ["ok", "warning", "critical"],
+            "enum": [
+              "ok",
+              "warning",
+              "critical"
+            ],
             "description": "The status level returned by the check"
           },
           "description": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "Optional description of what the check monitors"
           },
           "meta": {
             "type": "object",
             "description": "Optional additional diagnostic information from the check",
             "additionalProperties": true
+          }
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "description": "Opt-in deployment-verification manifest. Absent on plugin versions that predate the contract, which a runner must treat as unsupported rather than as an empty passing suite.",
+      "required": [
+        "schema_version",
+        "supported",
+        "enabled",
+        "valid",
+        "pages",
+        "errors"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "description": "The manifest contract version the site is publishing"
+        },
+        "supported": {
+          "type": "boolean",
+          "description": "Always true when the field is present; lets a runner distinguish an unsupported plugin from a disabled one"
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether the site has opted in by configuring any pages"
+        },
+        "valid": {
+          "type": "boolean",
+          "description": "False when any definition failed validation, in which case pages is empty and errors explains why"
+        },
+        "pages": {
+          "type": "array",
+          "description": "The pages to capture and assert. Empty whenever enabled or valid is false.",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "path",
+              "assert"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Stable identifier for this page, unique within the manifest"
+              },
+              "path": {
+                "type": "string",
+                "description": "Site-relative path, resolved by the runner against an origin it is configured with separately"
+              },
+              "assert": {
+                "type": "object",
+                "required": [
+                  "visible"
+                ],
+                "properties": {
+                  "visible": {
+                    "type": "string",
+                    "description": "Selector for an element that must be visible for the page to be considered correct"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "errors": {
+          "type": "array",
+          "description": "Human-readable validation failures. Non-empty only when valid is false.",
+          "items": {
+            "type": "string"
           }
         }
       }
