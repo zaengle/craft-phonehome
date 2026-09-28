@@ -82,6 +82,12 @@ export default class VerificationReporter implements Reporter {
             }, {}),
             // Recorded, not acted on: the run used the frozen definitions either way, and an
             // operator reading a clean result needs to know the site has since been redefined.
+            // What the run was verified across, when the loop applied it. A comparison whose
+            // change never landed is a pass about nothing, so it is recorded next to the verdict.
+            // What the run chose not to look at. A clean result is only as meaningful as the
+            // coverage behind it, and a mask is coverage deliberately given up.
+            masks: this.readMasks(),
+            change: existsSync(this.paths.change) ? (JSON.parse(readFileSync(this.paths.change, 'utf8')) as unknown) : null,
             manifest_drift: existsSync(this.paths.drift) ? (JSON.parse(readFileSync(this.paths.drift, 'utf8')) as string[]) : [],
             checks: this.checks,
         };
@@ -122,6 +128,30 @@ export default class VerificationReporter implements Reporter {
 
         writeFileSync(this.paths.pendingCapture, `${JSON.stringify({ ...pending, completed_at: new Date().toISOString() }, null, 2)}\n`);
         renameSync(this.paths.pendingCapture, this.paths.capture);
+    }
+
+    /**
+     * @return Record<string, string[]>
+     */
+    private readMasks(): Record<string, string[]> {
+        if (!existsSync(this.paths.manifest)) {
+            return {};
+        }
+
+        try {
+            const manifest = JSON.parse(readFileSync(this.paths.manifest, 'utf8')) as { pages?: { id: string; mask?: string[] }[] };
+            const masked: Record<string, string[]> = {};
+
+            for (const page of manifest.pages ?? []) {
+                if ((page.mask ?? []).length > 0) {
+                    masked[page.id] = page.mask ?? [];
+                }
+            }
+
+            return masked;
+        } catch {
+            return {};
+        }
     }
 
     private readRecord(path: string): CaptureRecord | null {

@@ -35,12 +35,18 @@ class Verification extends Component
      * than something to ignore, so that `assertions` in place of `assert` is caught here instead of
      * silently producing a page with no assertion.
      */
-    private const PAGE_KEYS = ['id', 'path', 'assert'];
+    private const PAGE_KEYS = ['id', 'path', 'assert', 'mask'];
+
+    /**
+     * @var int Most mask selectors a page may declare. Bounded because a mask is coverage removed,
+     * and an unbounded list of them is a page that is no longer being checked.
+     */
+    public const MAX_MASKS = 10;
 
     /**
      * Returns the normalised manifest for this site.
      *
-     * @return array{schema_version: int, supported: bool, enabled: bool, valid: bool, pages: list<array{id: string, path: string, assert: array{visible: string}}>, errors: list<string>}
+     * @return array{schema_version: int, supported: bool, enabled: bool, valid: bool, pages: list<array{id: string, path: string, assert: array{visible: string}, mask: list<string>}>, errors: list<string>}
      */
     public function getManifest(): array
     {
@@ -51,7 +57,7 @@ class Verification extends Component
      * Normalises and validates a raw `verification` config value.
      *
      * @param array<mixed> $raw
-     * @return array{schema_version: int, supported: bool, enabled: bool, valid: bool, pages: list<array{id: string, path: string, assert: array{visible: string}}>, errors: list<string>}
+     * @return array{schema_version: int, supported: bool, enabled: bool, valid: bool, pages: list<array{id: string, path: string, assert: array{visible: string}, mask: list<string>}>, errors: list<string>}
      */
     public function normalize(array $raw): array
     {
@@ -94,6 +100,7 @@ class Verification extends Component
             $id = $this->validateId($page['id'] ?? null, $index, $seenIds, $errors);
             $path = $this->validatePath($page['path'] ?? null, $index, $errors);
             $selector = $this->validateSelector($page['assert'] ?? null, $index, $errors);
+            $mask = $this->validateMask($page['mask'] ?? null, $selector, $index, $errors);
 
             foreach (array_keys($page) as $key) {
                 if (!in_array($key, self::PAGE_KEYS, true)) {
@@ -105,11 +112,16 @@ class Verification extends Component
                 continue;
             }
 
+            if ($mask === null) {
+                continue;
+            }
+
             $seenIds[] = $id;
             $normalized[] = [
                 'id' => $id,
                 'path' => $path,
                 'assert' => ['visible' => $selector],
+                'mask' => $mask,
             ];
         }
 
@@ -187,6 +199,57 @@ class Verification extends Component
     }
 
     /**
+     * Validates the optional list of selectors whose text and pixels are excluded from comparison.
+     *
+     * A mask is coverage deliberately given up, so the one thing it must never cover is the element
+     * the page is asserting on. Masking that would leave a check that passes because it is no
+     * longer looking at anything.
+     *
+     * @param list<string> $errors
+     * @return list<string>|null The selectors, or null when the definition is unusable
+     */
+    private function validateMask(mixed $value, ?string $assertSelector, int $index, array &$errors): ?array
+    {
+        if ($value === null) {
+            return [];
+        }
+
+        if (!is_array($value) || !array_is_list($value)) {
+            $errors[] = sprintf('Page %d mask must be a list of selectors.', $index);
+
+            return null;
+        }
+
+        if (count($value) > self::MAX_MASKS) {
+            $errors[] = sprintf('Page %d declares %d masks; the maximum is %d.', $index, count($value), self::MAX_MASKS);
+
+            return null;
+        }
+
+        $masks = [];
+
+        foreach ($value as $selector) {
+            if (!is_string($selector) || trim($selector) === '') {
+                $errors[] = sprintf('Page %d has a mask that is not a selector.', $index);
+
+                return null;
+            }
+
+            $selector = trim($selector);
+
+            if ($assertSelector !== null && $selector === $assertSelector) {
+                $errors[] = sprintf('Page %d masks the selector it asserts on, which would leave nothing to check.', $index);
+
+                return null;
+            }
+
+            $masks[] = $selector;
+        }
+
+        return $masks;
+    }
+
+    /**
      * @param list<string> $errors
      */
     private function validateSelector(mixed $value, int $index, array &$errors): ?string
@@ -215,9 +278,9 @@ class Verification extends Component
     }
 
     /**
-     * @param list<array{id: string, path: string, assert: array{visible: string}}> $pages
+     * @param list<array{id: string, path: string, assert: array{visible: string}, mask: list<string>}> $pages
      * @param list<string> $errors
-     * @return array{schema_version: int, supported: bool, enabled: bool, valid: bool, pages: list<array{id: string, path: string, assert: array{visible: string}}>, errors: list<string>}
+     * @return array{schema_version: int, supported: bool, enabled: bool, valid: bool, pages: list<array{id: string, path: string, assert: array{visible: string}, mask: list<string>}>, errors: list<string>}
      */
     private function result(bool $enabled, bool $valid, array $pages, array $errors): array
     {

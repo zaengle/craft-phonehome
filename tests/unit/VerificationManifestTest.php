@@ -47,8 +47,8 @@ class VerificationManifestTest extends TestCase
         $this->assertTrue($manifest['valid']);
         $this->assertSame(Verification::SCHEMA_VERSION, $manifest['schema_version']);
         $this->assertSame([
-            ['id' => 'home', 'path' => '/', 'assert' => ['visible' => 'main']],
-            ['id' => 'contact', 'path' => '/contact', 'assert' => ['visible' => '[data-testid="form"]']],
+            ['id' => 'home', 'path' => '/', 'assert' => ['visible' => 'main'], 'mask' => []],
+            ['id' => 'contact', 'path' => '/contact', 'assert' => ['visible' => '[data-testid="form"]'], 'mask' => []],
         ], $manifest['pages']);
     }
 
@@ -106,6 +106,64 @@ class VerificationManifestTest extends TestCase
             'carriage return between slashes' => ["/\r/evil.example.com"],
             'null byte' => ["/ok\0/evil.example.com"],
         ];
+    }
+
+    public function testMasksAreNormalisedAlongsideThePage(): void
+    {
+        $manifest = $this->verification->normalize([
+            'pages' => [
+                ['id' => 'home', 'path' => '/', 'assert' => ['visible' => 'main'], 'mask' => ['  .ticker  ', '.ago']],
+            ],
+        ]);
+
+        $this->assertTrue($manifest['valid']);
+        $this->assertSame(['.ticker', '.ago'], $manifest['pages'][0]['mask']);
+    }
+
+    /**
+     * A mask is coverage given up. Covering the asserted element would leave a check that passes
+     * because it is no longer looking at anything, which is worse than having no check.
+     */
+    public function testMaskingTheAssertedSelectorIsRejected(): void
+    {
+        $manifest = $this->verification->normalize([
+            'pages' => [
+                ['id' => 'home', 'path' => '/', 'assert' => ['visible' => 'main'], 'mask' => ['main']],
+            ],
+        ]);
+
+        $this->assertFalse($manifest['valid']);
+        $this->assertContains('Page 0 masks the selector it asserts on, which would leave nothing to check.', $manifest['errors']);
+    }
+
+    public function testMalformedMasksAreRejected(): void
+    {
+        foreach ([['mask' => 'ticker'], ['mask' => ['']], ['mask' => [123]], ['mask' => ['a' => 'b']]] as $extra) {
+            $manifest = $this->verification->normalize([
+                'pages' => [
+                    ['id' => 'home', 'path' => '/', 'assert' => ['visible' => 'main']] + $extra,
+                ],
+            ]);
+
+            $this->assertFalse($manifest['valid']);
+            $this->assertSame([], $manifest['pages']);
+        }
+    }
+
+    public function testMaskCountIsBounded(): void
+    {
+        $manifest = $this->verification->normalize([
+            'pages' => [
+                [
+                    'id' => 'home',
+                    'path' => '/',
+                    'assert' => ['visible' => 'main'],
+                    'mask' => array_map(fn(int $i) => ".m$i", range(0, Verification::MAX_MASKS)),
+                ],
+            ],
+        ]);
+
+        $this->assertFalse($manifest['valid']);
     }
 
     public function testDuplicateIdsAreRejected(): void

@@ -1,13 +1,16 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 /** A page as the plugin publishes it, after the plugin's own normalisation. */
 export interface ManifestPage {
     id: string;
     path: string;
     assert: { visible: string };
+    /** Selectors excluded from comparison. Absent on bundles frozen before masks existed. */
+    mask?: string[];
 }
 
 export interface Manifest {
@@ -37,6 +40,7 @@ export function bundlePaths(bundleDir: string) {
         abort: join(bundleDir, 'abort.json'),
         result: join(bundleDir, 'result.json'),
         drift: join(bundleDir, 'drift.json'),
+        change: join(bundleDir, 'change.json'),
         capture: join(bundleDir, 'capture.json'),
         pendingCapture: join(bundleDir, 'capture.pending.json'),
         attempts: join(bundleDir, 'attempts'),
@@ -157,6 +161,56 @@ export async function fetchReport(apiOrigin: string, token: string, insecureTls 
  * templates yield interchangeable-looking bundles, and comparing one against the other reports a
  * confident pass about the wrong system.
  */
+/**
+ * What rendered the baseline.
+ *
+ * A screenshot is only comparable against one taken by the same renderer. Bumping the Playwright
+ * image changes font rasterisation and image decoding, so every baseline silently starts comparing
+ * against differently-drawn pixels -- and because the bundle still validates on every other axis,
+ * the resulting diffs look like changes to the site.
+ *
+ * Read from the installed packages rather than from a running browser, so recording it costs
+ * nothing and cannot itself fail.
+ */
+export interface RenderEnvironment {
+    playwright: string;
+    chromium: string;
+    chromium_revision: string;
+    platform: string;
+}
+
+export function renderEnvironment(): RenderEnvironment {
+    const require = createRequire(import.meta.url);
+
+    const readJson = (specifier: string, relative = ''): Record<string, unknown> => {
+        try {
+            // Resolved through the package root and read from disk rather than required directly.
+            // playwright-core's `exports` map does not expose browsers.json, so requiring that path
+            // throws and the revision silently becomes unknown.
+            const root = require.resolve(`${specifier}/package.json`);
+
+            return JSON.parse(readFileSync(relative === '' ? root : join(dirname(root), relative), 'utf8')) as Record<string, unknown>;
+        } catch {
+            return {};
+        }
+    };
+
+    const playwright = readJson('@playwright/test').version;
+    const browsers = readJson('playwright-core', 'browsers.json').browsers;
+    const chromium = Array.isArray(browsers)
+        ? (browsers.find((entry: { name?: string }) => entry.name === 'chromium') as { revision?: string; browserVersion?: string } | undefined)
+        : undefined;
+
+    // 'unknown' rather than a guess, and an unknown still counts as a mismatch: two baselines whose
+    // renderer cannot be established are not known to be comparable.
+    return {
+        playwright: typeof playwright === 'string' ? playwright : 'unknown',
+        chromium: typeof chromium?.browserVersion === 'string' ? chromium.browserVersion : 'unknown',
+        chromium_revision: typeof chromium?.revision === 'string' ? chromium.revision : 'unknown',
+        platform: `${process.platform}-${process.arch}`,
+    };
+}
+
 export interface CaptureRecord {
     run_id: string;
     completed_at: string;
@@ -172,11 +226,12 @@ export interface CaptureRecord {
         full_page: boolean;
         viewport: { width: number; height: number };
     };
+    environment: RenderEnvironment;
     expected_checks: string[];
 }
 
 /** Bumped when a bundle's shape changes in a way that makes older bundles unusable. */
-export const RUNNER_CONTRACT = 2;
+export const RUNNER_CONTRACT = 3;
 
 /**
  * Reads the identity fields out of a report payload. Absent values stay null rather than being
@@ -238,7 +293,13 @@ export function readCaptureRecord(bundleDir: string): CaptureRecord | null {
  *
  * @return list<string> Reasons the bundle cannot be used, empty when it can
  */
-export function bundleObjections(record: CaptureRecord, origin: string, apiOrigin: string, fullPage: boolean): string[] {
+export function bundleObjections(
+    record: CaptureRecord,
+    origin: string,
+    apiOrigin: string,
+    fullPage: boolean,
+    environment: RenderEnvironment,
+): string[] {
     const objections: string[] = [];
 
     if (record.runner_contract !== RUNNER_CONTRACT) {
@@ -257,6 +318,20 @@ export function bundleObjections(record: CaptureRecord, origin: string, apiOrigi
         objections.push(`The baseline was captured with full_page=${record.settings.full_page}; this run has full_page=${fullPage}.`);
     }
 
+    // Compared field by field so the objection names what moved. A bundle recorded before this was
+    // tracked has no environment at all, which is itself a reason to refuse it.
+    const before = record.environment;
+
+    if (before === undefined) {
+        objections.push('The baseline does not record what rendered it, so it cannot be compared against.');
+    } else {
+        for (const key of ['playwright', 'chromium', 'chromium_revision', 'platform'] as const) {
+            if (before[key] !== environment[key]) {
+                objections.push(`The baseline was rendered with ${key} ${before[key]}; this run has ${environment[key]}.`);
+            }
+        }
+    }
+
     return objections;
 }
 
@@ -267,7 +342,7 @@ export function bundleObjections(record: CaptureRecord, origin: string, apiOrigi
  * deleted between capture and compare would silently leave the suite instead of failing.
  */
 export function describeDrift(frozen: Manifest, current: Manifest): string[] {
-    const key = (page: ManifestPage) => `${page.id} ${page.path} ${page.assert.visible}`;
+    const key = (page: ManifestPage) => `${page.id} ${page.path} ${page.assert.visible} ${(page.mask ?? []).join('|')}`;
     const frozenKeys = new Map(frozen.pages.map((page) => [page.id, key(page)]));
     const currentKeys = new Map(current.pages.map((page) => [page.id, key(page)]));
     const drift: string[] = [];

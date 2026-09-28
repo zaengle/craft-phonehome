@@ -11,6 +11,7 @@ import {
     readCaptureRecord,
     readFrozenManifest,
     readIdentity,
+    renderEnvironment,
     RUNNER_CONTRACT,
     writeBundle,
     type Abort,
@@ -114,6 +115,7 @@ async function prepareCapture(): Promise<void> {
         runner_contract: RUNNER_CONTRACT,
         site: { ...readIdentity(report.payload), origin: config.origin, api_origin: config.apiOrigin },
         settings: { full_page: config.fullPage, viewport: VIEWPORT },
+        environment: renderEnvironment(),
         expected_checks: expectedChecks(report.manifest),
     };
 
@@ -132,7 +134,7 @@ async function prepareCompare(): Promise<void> {
         return;
     }
 
-    const objections = bundleObjections(record, config.origin, config.apiOrigin, config.fullPage);
+    const objections = bundleObjections(record, config.origin, config.apiOrigin, config.fullPage, renderEnvironment());
 
     if (objections.length > 0) {
         abort('bundle_mismatch', objections);

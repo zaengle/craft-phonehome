@@ -116,7 +116,18 @@ if (existsSync(paths.abort)) {
                 throw new Error(`${INCONCLUSIVE} unreachable — ${page.path} returned ${response.status()}.`);
             }
 
-            const text = await browserPage.evaluate(() => (document.body.innerText ?? '').replace(/\s+/g, ' ').trim());
+            // Masked elements are replaced with a marker rather than removed, so the page's
+            // shape is still compared. Deleting their text instead would mean a masked block
+            // disappearing entirely looked identical to it simply having nothing to say.
+            const text = await browserPage.evaluate((selectors: string[]) => {
+                for (const selector of selectors) {
+                    for (const element of Array.from(document.querySelectorAll(selector))) {
+                        element.textContent = '[masked]';
+                    }
+                }
+
+                return (document.body.innerText ?? '').replace(/\s+/g, ' ').trim();
+            }, page.mask ?? []);
 
             expect(text).toMatchSnapshot(`${page.id}.txt`);
         });
@@ -146,7 +157,10 @@ if (existsSync(paths.abort)) {
                 }
             }
 
-            await expect(browserPage).toHaveScreenshot(`${page.id}.png`, { fullPage: config.fullPage });
+            await expect(browserPage).toHaveScreenshot(`${page.id}.png`, {
+                fullPage: config.fullPage,
+                mask: (page.mask ?? []).map((selector) => browserPage.locator(selector)),
+            });
         });
     }
 }

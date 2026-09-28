@@ -506,7 +506,8 @@
             "required": [
               "id",
               "path",
-              "assert"
+              "assert",
+              "mask"
             ],
             "properties": {
               "id": {
@@ -527,6 +528,13 @@
                     "type": "string",
                     "description": "Selector for an element that must be visible for the page to be considered correct"
                   }
+                }
+              },
+              "mask": {
+                "type": "array",
+                "description": "Selectors whose text and pixels are excluded from comparison. Coverage deliberately given up, so it may never cover the asserted element.",
+                "items": {
+                  "type": "string"
                 }
               }
             }

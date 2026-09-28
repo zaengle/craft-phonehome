@@ -35,6 +35,16 @@ return [
 //        'pages' => [
 //            ['id' => 'home', 'path' => '/', 'assert' => ['visible' => '[data-testid="site-header"]']],
 //            ['id' => 'contact', 'path' => '/contact', 'assert' => ['visible' => '[data-testid="contact-form"]']],
+//            // Anything that legitimately differs between two runs -- a rotating testimonial, a
+//            // relative date, a visitor counter -- has to be masked or it reports a change every
+//            // time, and a check that cries wolf is a check nobody reads. A mask is coverage given
+//            // up, so keep the list short and never mask the element being asserted on.
+//            [
+//                'id' => 'home',
+//                'path' => '/',
+//                'assert' => ['visible' => '[data-testid="site-header"]'],
+//                'mask' => ['[data-testid="rotating-testimonial"]', '.published-ago'],
+//            ],
 //        ],
 //    ],
 //
