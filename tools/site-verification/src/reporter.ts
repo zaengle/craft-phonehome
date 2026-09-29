@@ -29,6 +29,20 @@ const OBSERVED: Outcome[] = ['failed', 'changes_detected'];
 
 const INCONCLUSIVE = 'INCONCLUSIVE:';
 
+/**
+ * Terminal colour codes, which Playwright embeds throughout its error messages.
+ *
+ * They are meaningless outside a terminal, and the result is read far more often somewhere else --
+ * a dashboard, a CI log viewer, a pasted excerpt -- where they render as literal `[2m` fragments
+ * that bury the one sentence worth reading.
+ */
+// eslint-disable-next-line no-control-regex
+const ANSI = /\u001b\[[0-9;]*m/g;
+
+function plainText(message: string): string {
+    return message.replace(ANSI, '');
+}
+
 interface CheckResult {
     id: string;
     kind: 'assert' | 'screenshot' | 'text' | 'gate';
@@ -49,14 +63,14 @@ export default class VerificationReporter implements Reporter {
     onTestEnd(test: TestCase, result: TestResult): void {
         const [rawKind, ...rest] = test.title.split(':');
         const kind = rawKind === 'assert' || rawKind === 'screenshot' || rawKind === 'text' ? rawKind : 'gate';
-        const message = result.errors.map((error) => error.message ?? '').join('\n');
+        const message = plainText(result.errors.map((error) => error.message ?? '').join('\n'));
 
         this.checks.push({
             id: rest.join(':') || test.title,
             kind,
             outcome: this.classify(kind, result, message),
             durationMs: result.duration,
-            diagnostic: message === '' ? null : message.split('\n').slice(0, 4).join(' ').trim(),
+            diagnostic: message === '' ? null : message.split('\n').slice(0, 4).join(' ').replace(/\s+/g, ' ').trim(),
         });
     }
 
