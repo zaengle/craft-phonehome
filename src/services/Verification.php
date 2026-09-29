@@ -4,8 +4,11 @@ namespace zaengle\phonehome\services;
 
 use craft\db\Query;
 use craft\db\Table;
+use craft\helpers\Db;
+use DateTime;
 use Throwable;
 use yii\base\Component;
+use yii\db\Expression;
 use zaengle\phonehome\PhoneHome;
 
 /**
@@ -59,7 +62,113 @@ class Verification extends Component
      */
     public function getManifest(): array
     {
-        return $this->normalize(PhoneHome::$plugin->getSettings()->verification);
+        $raw = PhoneHome::$plugin->getSettings()->verification;
+        $auto = ($raw['autoCoverTemplates'] ?? null) === true;
+        $defaultAssert = $raw['defaultAssert'] ?? ['visible' => 'h1'];
+        $masks = $raw['masks'] ?? [];
+
+        // Removed before validation so the page contract stays exactly what it was. A mistyped key
+        // such as `autoCoverTemplate` therefore still fails loudly as an unknown key.
+        unset($raw['autoCoverTemplates'], $raw['defaultAssert'], $raw['masks']);
+
+        if ($auto) {
+            $raw['pages'] = $this->withAutoCoverage($raw['pages'] ?? [], $defaultAssert, $masks);
+        }
+
+        return $this->normalize($raw);
+    }
+
+    /**
+     * Appends one page per template that the site's explicit pages do not already cover.
+     *
+     * Coverage becomes a property of the manifest rather than of whoever wrote it, and it heals
+     * itself: an entry expiring or a new section appearing changes the generated set on the next
+     * report rather than leaving a list that quietly stopped being true.
+     *
+     * Explicit pages always win. A generated page is only ever added for a template nothing
+     * explicit already reaches.
+     *
+     * @param array<mixed> $explicit
+     * @param array<mixed> $defaultAssert
+     * @param array<mixed> $masks
+     * @return array<mixed>
+     */
+    private function withAutoCoverage(array $explicit, array $defaultAssert, array $masks): array
+    {
+        try {
+            $representatives = $this->representativeUris();
+        } catch (Throwable $e) {
+            PhoneHome::error('Error selecting pages for automatic coverage: ' . $e->getMessage());
+
+            return $explicit;
+        }
+
+        $explicitPaths = [];
+
+        foreach ($explicit as $page) {
+            if (is_array($page) && is_string($page['path'] ?? null)) {
+                $explicitPaths[] = $this->pathToUri($page['path']);
+            }
+        }
+
+        $covered = array_intersect_key($representatives, array_flip($explicitPaths));
+
+        try {
+            $covered = array_merge(
+                $covered,
+                $this->templatesForUris(Table::SECTIONS_SITES, Table::ENTRIES, 'sectionId', $explicitPaths),
+                $this->templatesForUris(Table::CATEGORYGROUPS_SITES, Table::CATEGORIES, 'groupId', $explicitPaths),
+            );
+        } catch (Throwable $e) {
+            PhoneHome::error('Error resolving explicit page templates: ' . $e->getMessage());
+        }
+
+        $coveredTemplates = array_flip(array_values($covered));
+        $pages = $explicit;
+        $usedIds = [];
+
+        foreach ($explicit as $page) {
+            if (is_array($page) && is_string($page['id'] ?? null)) {
+                $usedIds[$page['id']] = true;
+            }
+        }
+
+        foreach ($representatives as $template => $uri) {
+            if (isset($coveredTemplates[$template])) {
+                continue;
+            }
+
+            $id = $this->templateId($template, $usedIds);
+            $usedIds[$id] = true;
+
+            $page = ['id' => $id, 'path' => '/' . $uri, 'assert' => $defaultAssert];
+
+            if ($masks !== []) {
+                $page['mask'] = $masks;
+            }
+
+            $pages[] = $page;
+        }
+
+        return $pages;
+    }
+
+    /**
+     * @param array<string, bool> $used
+     */
+    private function templateId(string $template, array $used): string
+    {
+        $base = preg_replace('/[^a-z0-9]+/', '-', strtolower($template)) ?? 'template';
+        $base = trim((string)$base, '-');
+        $id = 'auto-' . ($base === '' ? 'template' : $base);
+        $candidate = $id;
+        $suffix = 2;
+
+        while (isset($used[$candidate])) {
+            $candidate = $id . '-' . $suffix++;
+        }
+
+        return $candidate;
     }
 
     /**
@@ -169,8 +278,11 @@ class Verification extends Component
             // Aggregated in the database and narrowed to the manifest's own URIs. Reading every
             // routable URI into PHP is fine on a small site and ruinous on a large one, and this
             // runs on every ping.
+            // Counted from the same live query that selects pages. Counting enabled-but-expired
+            // rows inflates the denominator with templates nothing can reach, which reads as a
+            // permanent coverage gap that no page could ever close.
             $templates = array_values(array_unique(array_merge(
-                $this->routableTemplates(Table::SECTIONS_SITES, Table::ENTRIES, 'sectionId'),
+                array_keys($this->representativeUris()),
                 $this->routableTemplates(Table::CATEGORYGROUPS_SITES, Table::CATEGORIES, 'groupId'),
             )));
 
@@ -207,7 +319,46 @@ class Verification extends Component
             ->andWhere(['not', ['elements_sites.uri' => '']])
             ->andWhere(['not', ['settings.template' => null]])
             ->andWhere(['not', ['settings.template' => '']])
-            ->andWhere(['elements.dateDeleted' => null, 'elements.revisionId' => null, 'elements.draftId' => null]);
+            ->andWhere(['elements.dateDeleted' => null, 'elements.revisionId' => null, 'elements.draftId' => null])
+            ->andWhere(['elements.enabled' => true]);
+    }
+
+    /**
+     * Narrows a routable query to entries a visitor can actually load.
+     *
+     * An expired or future-dated entry keeps its enabled URI row, so counting those as coverage
+     * names pages that 404. Two of the pages picked by hand for this pilot did exactly that.
+     */
+    private function liveEntriesQuery(): Query
+    {
+        $now = Db::prepareDateForDb(new DateTime());
+
+        return $this->routableQuery(Table::SECTIONS_SITES, Table::ENTRIES, 'sectionId')
+            ->andWhere(['or', ['el_type.postDate' => null], ['<=', 'el_type.postDate', $now]])
+            ->andWhere(['or', ['el_type.expiryDate' => null], ['>', 'el_type.expiryDate', $now]]);
+    }
+
+    /**
+     * One live URI per template, for templates nothing else covers.
+     *
+     * @return array<string, string> template => uri
+     */
+    private function representativeUris(): array
+    {
+        $rows = $this->liveEntriesQuery()
+            ->select(['settings.template AS template', 'uri' => new Expression('MIN([[elements_sites.uri]])')])
+            ->groupBy(['settings.template'])
+            ->all();
+
+        $byTemplate = [];
+
+        foreach ($rows as $row) {
+            if (is_string($row['template'] ?? null) && is_string($row['uri'] ?? null)) {
+                $byTemplate[$row['template']] = $row['uri'];
+            }
+        }
+
+        return $byTemplate;
     }
 
     /**
