@@ -241,6 +241,10 @@ export default defineConfig({
         // Scoped to the flag that documents it. Left unconditionally true, the browser would
         // accept any certificate while the README claimed the leniency covered one API request.
         ignoreHTTPSErrors: config.insecureTls,
+        // Applied to the site being rendered only. Without these a staging environment behind an
+        // auth prompt is photographed as the prompt, and every page reports its required element
+        // missing -- a `failed` that says nothing about the deploy.
+        ...(config.basicAuth === null ? {} : { httpCredentials: config.basicAuth }),
         screenshot: 'off',
         trace: 'off',
     },

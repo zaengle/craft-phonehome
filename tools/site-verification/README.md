@@ -74,6 +74,35 @@ told which baseline it is comparing against. Generating one would compare a run 
 | `PHV_API_ORIGIN` | Plugin API origin, when it differs from the site origin |
 | `PHV_INSECURE_TLS` | Accepts a self-signed certificate, for one request, for local work only |
 
+## Running it in CI
+
+A baseline lives in Phone Home rather than on disk, so the two halves of a pair need not share a
+machine — which in CI they cannot, since each job gets a fresh one. Set `PHV_DASHBOARD_ORIGIN` and
+a capture pushes its bundle; a comparison with nothing local pulls it back before anything reads it.
+
+`.github/workflows/site-verification.yml` in this repository is a reusable workflow. A site calls it
+around its existing deploy; see `examples/verify-on-deploy.yml` for the whole file to copy.
+
+Three things decide whether a pair is comparable, and all three are enforced rather than assumed:
+
+- **The browser and platform.** A baseline records its Playwright version, Chromium version,
+  Chromium revision and platform, and a comparison against a different one is refused. The workflow
+  pins the same image the local DDEV service uses for exactly this reason.
+- **The origin.** A baseline captured against one origin is not comparable against another, so a
+  local bundle can never be used against staging even by accident.
+- **The run id.** Both halves must share one, and it must be new. Re-capturing over a sealed
+  baseline is refused, because otherwise a comparison that found a regression could be made to pass
+  by running capture again.
+
+Note that **CI captures its own baselines**. A baseline taken on an Apple Silicon Mac records
+`linux-arm64` and will never match a GitHub runner's `linux-x64`; the origins differ too. Local
+bundles are for local work.
+
+If the environment sits behind HTTP basic auth — staging commonly does — set `PHV_BASIC_AUTH_USER`
+and `PHV_BASIC_AUTH_PASS`. Without them the runner photographs the browser's own auth prompt and
+reports a missing required element on every page, which is a `failed` that says nothing about the
+deploy.
+
 ## Outcomes
 
 Results are four states rather than pass and fail, because the difference between them is the thing

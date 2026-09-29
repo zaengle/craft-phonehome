@@ -48,6 +48,14 @@ export interface RunConfig {
      * against its own records before trusting it, so this is a hint rather than an assertion.
      */
     patchId: number | null;
+    /**
+     * HTTP basic credentials for the site being rendered, when it sits behind them.
+     *
+     * Staging environments commonly do, and staging is the environment this is most useful
+     * against. Without these the runner photographs the browser's own auth prompt and reports a
+     * missing required element on every page.
+     */
+    basicAuth: { username: string; password: string } | null;
 }
 
 function required(name: string): string {
@@ -117,6 +125,9 @@ export function runConfig(): RunConfig {
         dashboardOrigin: process.env.PHV_DASHBOARD_ORIGIN?.replace(/\/+$/, '') || null,
         dashboardInsecureTls: process.env.PHV_DASHBOARD_INSECURE_TLS === '1',
         patchId: Number.isInteger(Number(process.env.PHV_PATCH_ID)) && process.env.PHV_PATCH_ID ? Number(process.env.PHV_PATCH_ID) : null,
+        basicAuth: process.env.PHV_BASIC_AUTH_USER
+            ? { username: process.env.PHV_BASIC_AUTH_USER, password: process.env.PHV_BASIC_AUTH_PASS ?? '' }
+            : null,
         // Resolved here rather than at each use. Two callers each defaulting to Date.now() disagree
         // by a millisecond and quietly write one run's evidence into two directories.
         attemptId: attemptId(mode),

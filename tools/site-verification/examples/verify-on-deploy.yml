@@ -1,0 +1,62 @@
+# Copy this into a site's repository as .github/workflows/verify-on-deploy.yml, then put its
+# existing deploy between the two halves.
+#
+# The shape is: freeze a baseline, deploy, compare against the frozen copy. Both halves must share
+# a run id, and it must be one this site has not used before — the commit SHA does both jobs.
+#
+# What this needs before it will run:
+#
+#   * Secret PHONEHOME_TOKEN — the site's Phone Home token, the same value in its own .env.
+#   * Secrets STAGING_BASIC_AUTH_USER / _PASSWORD — only if the environment sits behind an auth
+#     prompt, which staging commonly does. Without them the runner photographs the prompt and
+#     reports a missing required element on every page.
+#   * The site's plugin configured with a `verification` block, and reporting api_version 1.5.0 or
+#     later. A site that has not opted in is reported as disabled, not as an empty passing suite.
+name: Verify on deploy
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  # A second deploy starting mid-pair would compare the new baseline against the old site. The
+  # pair is only meaningful uninterrupted.
+  group: verify-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@main
+    with:
+      mode: capture
+      run_id: ${{ github.sha }}
+      origin: https://staging.example.com
+      dashboard_origin: https://phone-home.example.com
+      # Pin this to a tag once the plugin is released. `main` means a runner change lands in every
+      # site's verification without anyone choosing it.
+      runner_ref: main
+    secrets:
+      phonehome_token: ${{ secrets.PHONEHOME_TOKEN }}
+      basic_auth_user: ${{ secrets.STAGING_BASIC_AUTH_USER }}
+      basic_auth_password: ${{ secrets.STAGING_BASIC_AUTH_PASSWORD }}
+
+  deploy:
+    needs: baseline
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy
+        run: echo "Whatever this site already does — Envoyer, rsync, a deploy hook."
+
+  verify:
+    needs: deploy
+    uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@main
+    with:
+      mode: compare
+      run_id: ${{ github.sha }}
+      origin: https://staging.example.com
+      dashboard_origin: https://phone-home.example.com
+      runner_ref: main
+    secrets:
+      phonehome_token: ${{ secrets.PHONEHOME_TOKEN }}
+      basic_auth_user: ${{ secrets.STAGING_BASIC_AUTH_USER }}
+      basic_auth_password: ${{ secrets.STAGING_BASIC_AUTH_PASSWORD }}

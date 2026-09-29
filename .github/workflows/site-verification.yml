@@ -1,0 +1,141 @@
+# Deployment verification for a Craft site running the Phone Home plugin.
+#
+# Called from a site's own repository around its existing deploy: capture a baseline, deploy, then
+# compare against the frozen copy. Nothing here deploys anything, and nothing here needs write
+# access to the calling repository.
+#
+# The baseline lives in Phone Home rather than on the runner, so the two halves need not share a
+# machine — which they cannot, since each job gets a fresh one.
+name: Site verification
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: 'capture to freeze a baseline, compare to check against one.'
+        required: true
+        type: string
+      run_id:
+        description: >-
+          Identifies the bundle. Both halves of a pair must use the same value, and it must be new
+          for each pair — the commit SHA is the obvious choice. Reusing one is refused rather than
+          allowed to silently replace a reference somebody has already read.
+        required: true
+        type: string
+      origin:
+        description: 'The site to render, e.g. https://staging.example.com.'
+        required: true
+        type: string
+      api_origin:
+        description: 'Where the Phone Home plugin API lives, if not the same host as the site.'
+        required: false
+        type: string
+        default: ''
+      dashboard_origin:
+        description: 'The Phone Home instance results are reported to.'
+        required: true
+        type: string
+      patch_id:
+        description: 'The Phone Home patch this run is verifying, if it is verifying one.'
+        required: false
+        type: string
+        default: ''
+      full_page:
+        description: >-
+          Capture the whole scrollable document instead of the viewport. Off by default, because
+          scroll-driven animation makes real pages tens of thousands of pixels tall and a full-page
+          capture of one can kill the browser.
+        required: false
+        type: boolean
+        default: false
+      runner_ref:
+        description: 'Which ref of this repository the runner is taken from. Pin it.'
+        required: false
+        type: string
+        default: 'main'
+    secrets:
+      phonehome_token:
+        description: "The site's Phone Home token. Also authenticates to the dashboard."
+        required: true
+      basic_auth_user:
+        description: 'HTTP basic username, if the environment sits behind one.'
+        required: false
+      basic_auth_password:
+        required: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    # Pinned to the same image the local DDEV service uses, and to the same Playwright version as
+    # the runner's package.json. A baseline records the browser, the browser revision and the
+    # platform that produced it, and a comparison against a different one is refused rather than
+    # reported — so this is not a convenience, it is the thing that makes the pair comparable.
+    #
+    # Note that a baseline captured on an Apple Silicon Mac is `linux-arm64` and will never match a
+    # GitHub runner's `linux-x64`. CI captures its own baselines; local ones are for local work.
+    container:
+      image: mcr.microsoft.com/playwright:v1.49.1-noble
+
+    steps:
+      - name: Check out the runner
+        uses: actions/checkout@v4
+        with:
+          repository: zaengle/craft-phonehome
+          ref: ${{ inputs.runner_ref }}
+          path: runner
+
+      - name: Install the runner's dependencies
+        working-directory: runner/tools/site-verification
+        run: npm ci
+
+      - name: ${{ inputs.mode == 'capture' && 'Freeze a baseline' || 'Compare against the baseline' }}
+        working-directory: runner/tools/site-verification
+        env:
+          PHV_MODE: ${{ inputs.mode }}
+          PHV_RUN_ID: ${{ inputs.run_id }}
+          PHV_ORIGIN: ${{ inputs.origin }}
+          PHV_API_ORIGIN: ${{ inputs.api_origin }}
+          PHV_TOKEN: ${{ secrets.phonehome_token }}
+          PHV_DASHBOARD_ORIGIN: ${{ inputs.dashboard_origin }}
+          PHV_PATCH_ID: ${{ inputs.patch_id }}
+          PHV_FULL_PAGE: ${{ inputs.full_page && '1' || '0' }}
+          PHV_BASIC_AUTH_USER: ${{ secrets.basic_auth_user }}
+          PHV_BASIC_AUTH_PASS: ${{ secrets.basic_auth_password }}
+        run: npm run --silent ${{ inputs.mode }}
+
+      # The result is already in Phone Home by this point. This is for the person reading the failed
+      # job, who should not have to open another tab to see what the run said.
+      - name: Summarise the outcome
+        if: always()
+        working-directory: runner/tools/site-verification
+        run: |
+          result="$(find runs -name result.json -print -quit 2>/dev/null || true)"
+
+          if [ -z "$result" ]; then
+            echo "The run produced no result file, which means it did not get far enough to report." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          node -e '
+            const report = require(process.argv[1]);
+            const rows = (report.checks ?? [])
+              .filter((check) => check.outcome !== "passed")
+              .map((check) => `| ${check.id} | ${check.kind} | ${check.outcome} | ${(check.diagnostic ?? "").slice(0, 160)} |`);
+
+            const lines = [`## Verification: ${String(report.overall).toUpperCase()}`, ""];
+
+            if ((report.missing_checks ?? []).length > 0) {
+              lines.push(`**${report.missing_checks.length} check(s) the manifest owed never ran**, so this result is not the run that was asked for: ${report.missing_checks.join(", ")}`, "");
+            }
+
+            if ((report.manifest_warnings ?? []).length > 0) {
+              lines.push(`**The site reported a narrowed manifest:** ${report.manifest_warnings.join(" ")}`, "");
+            }
+
+            lines.push(rows.length > 0
+              ? ["| Page | Check | Outcome | Diagnostic |", "|---|---|---|---|", ...rows].join("\n")
+              : "Every check passed.");
+
+            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n") + "\n");
+          ' "$result"
