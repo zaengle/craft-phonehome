@@ -10,11 +10,17 @@ use zaengle\phonehome\services\Verification;
  */
 class VerificationProbe extends Verification
 {
-    /** @var array<string, string> template => representative live uri */
+    /** @var array<string, string> render target => representative live uri */
     public array $representatives = [];
 
-    /** @var array<string, string> uri => template, for the explicit pages */
+    /** @var array<string, string> uri => render target, for the explicit pages */
     public array $explicitTemplates = [];
+
+    /** @var list<string> render targets with nothing live behind them */
+    public array $dormant = [];
+
+    /** @var array<string, string> category template => representative live uri */
+    public array $categoryRepresentatives = [];
 
     /** Set to simulate the selection query failing. */
     public bool $failSelection = false;
@@ -33,6 +39,12 @@ class VerificationProbe extends Verification
         return $this->withAutoCoverage($explicit, $defaultAssert, $masks);
     }
 
+    /** @return list<string> */
+    public function reportedWarnings(): array
+    {
+        return $this->warnings;
+    }
+
     protected function logError(string $message): void
     {
         $this->loggedErrors[] = $message;
@@ -49,6 +61,21 @@ class VerificationProbe extends Verification
 
     protected function templatesForUris(string $settingsTable, string $elementTable, string $foreignKey, array $uris): array
     {
+        return [];
+    }
+
+    protected function entryTargetsForUris(array $uris): array
+    {
         return array_intersect_key($this->explicitTemplates, array_flip($uris));
+    }
+
+    protected function representativeCategoryUris(): array
+    {
+        return $this->categoryRepresentatives;
+    }
+
+    protected function dormantTargets(): array
+    {
+        return $this->dormant;
     }
 }

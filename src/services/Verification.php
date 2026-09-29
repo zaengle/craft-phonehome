@@ -2,6 +2,7 @@
 
 namespace zaengle\phonehome\services;
 
+use Craft;
 use craft\db\Query;
 use craft\db\Table;
 use craft\helpers\Db;
@@ -56,12 +57,33 @@ class Verification extends Component
     public const MAX_MASKS = 10;
 
     /**
+     * Selectors that cannot be masked, because each one is the whole page.
+     *
+     * The runner does the real work here -- only a rendered document knows that `main` contains the
+     * element a page asserts on -- but these four are wrong on every document there is, and
+     * rejecting the manifest says so at the point the mistake was made rather than at the end of a
+     * capture run.
+     *
+     * @var list<string>
+     */
+    public const UNMASKABLE = ['html', 'body', ':root', '*'];
+
+    /**
+     * Conditions that narrowed the manifest without invalidating it.
+     *
+     * @var list<string>
+     */
+    protected array $warnings = [];
+
+    /**
      * Returns the normalised manifest for this site.
      *
-     * @return array{schema_version: int, supported: bool, enabled: bool, valid: bool, pages: list<array{id: string, path: string, assert: array{visible: string}, mask: list<string>}>, errors: list<string>}
+     * @return array{schema_version: int, supported: bool, enabled: bool, valid: bool, pages: list<array{id: string, path: string, assert: array{visible: string}, mask: list<string>}>, errors: list<string>, warnings: list<string>}
      */
     public function getManifest(): array
     {
+        $this->warnings = [];
+
         $raw = PhoneHome::$plugin->getSettings()->verification;
         $auto = ($raw['autoCoverTemplates'] ?? null) === true;
         $defaultAssert = $raw['defaultAssert'] ?? ['visible' => 'h1'];
@@ -96,9 +118,12 @@ class Verification extends Component
     protected function withAutoCoverage(array $explicit, array $defaultAssert, array $masks): array
     {
         try {
-            $representatives = $this->representativeUris();
+            // Entries first, so an entry target keeps its own representative if a category group
+            // happens to render through the same template.
+            $representatives = $this->representativeUris() + $this->representativeCategoryUris();
         } catch (Throwable $e) {
             $this->logError('Error selecting pages for automatic coverage: ' . $e->getMessage());
+            $this->warnings[] = 'Automatic page selection failed, so only the explicitly configured pages are verified.';
 
             return $explicit;
         }
@@ -111,16 +136,19 @@ class Verification extends Component
             }
         }
 
-        $covered = array_intersect_key($representatives, array_flip($explicitPaths));
+        // Resolved from the explicit paths themselves rather than by matching them against the
+        // representative set: the representatives are keyed by template and a path is a URI, so
+        // comparing the two only ever matched a site whose template name was also one of its URIs.
+        $covered = [];
 
         try {
             $covered = array_merge(
-                $covered,
-                $this->templatesForUris(Table::SECTIONS_SITES, Table::ENTRIES, 'sectionId', $explicitPaths),
+                $this->entryTargetsForUris($explicitPaths),
                 $this->templatesForUris(Table::CATEGORYGROUPS_SITES, Table::CATEGORIES, 'groupId', $explicitPaths),
             );
         } catch (Throwable $e) {
             $this->logError('Error resolving explicit page templates: ' . $e->getMessage());
+            $this->warnings[] = 'Could not resolve which templates the explicit pages cover, so a generated page may duplicate one of them.';
         }
 
         $coveredTemplates = array_flip(array_values($covered));
@@ -138,10 +166,17 @@ class Verification extends Component
                 continue;
             }
 
+            // Generating past the manifest limit would fail validation and leave the site with no
+            // verification at all, which is a worse answer than partial coverage. What did not fit
+            // is not silently dropped: it has no page, so the census reports it as uncovered.
+            if (count($pages) >= self::MAX_PAGES) {
+                break;
+            }
+
             $id = $this->templateId($template, $usedIds);
             $usedIds[$id] = true;
 
-            $page = ['id' => $id, 'path' => '/' . $uri, 'assert' => $defaultAssert];
+            $page = ['id' => $id, 'path' => $this->uriToPath($uri), 'assert' => $defaultAssert];
 
             if ($masks !== []) {
                 $page['mask'] = $masks;
@@ -183,7 +218,7 @@ class Verification extends Component
      * Normalises and validates a raw `verification` config value.
      *
      * @param array<mixed> $raw
-     * @return array{schema_version: int, supported: bool, enabled: bool, valid: bool, pages: list<array{id: string, path: string, assert: array{visible: string}, mask: list<string>}>, errors: list<string>}
+     * @return array{schema_version: int, supported: bool, enabled: bool, valid: bool, pages: list<array{id: string, path: string, assert: array{visible: string}, mask: list<string>}>, errors: list<string>, warnings: list<string>}
      */
     public function normalize(array $raw): array
     {
@@ -294,8 +329,10 @@ class Verification extends Component
                 $this->routableTemplates(Table::CATEGORYGROUPS_SITES, Table::CATEGORIES, 'groupId'),
             )));
 
+            $dormant = $this->dormantTargets();
+
             $matched = array_merge(
-                $this->templatesForUris(Table::SECTIONS_SITES, Table::ENTRIES, 'sectionId', $uris),
+                $this->entryTargetsForUris($uris),
                 $this->templatesForUris(Table::CATEGORYGROUPS_SITES, Table::CATEGORIES, 'groupId', $uris),
             );
 
@@ -306,7 +343,7 @@ class Verification extends Component
             return null;
         }
 
-        return $this->summariseCoverage($templates, $matched, $paths, $routableUris);
+        return $this->summariseCoverage($templates, $matched, $paths, $routableUris, $dormant);
     }
 
     /**
@@ -328,7 +365,21 @@ class Verification extends Component
             ->andWhere(['not', ['settings.template' => null]])
             ->andWhere(['not', ['settings.template' => '']])
             ->andWhere(['elements.dateDeleted' => null, 'elements.revisionId' => null, 'elements.draftId' => null])
-            ->andWhere(['elements.enabled' => true]);
+            ->andWhere(['elements.enabled' => true])
+            ->andWhere(['elements_sites.siteId' => $this->currentSiteId()]);
+    }
+
+    /**
+     * The one site this manifest is about.
+     *
+     * Without this, every count and every representative page was drawn from the whole install. On
+     * a multi-site build that means a manifest whose pages are on one origin, a denominator over
+     * templates from all of them, and a generated path that belongs to a different domain
+     * altogether -- which the runner then reports as off-origin or as a 404.
+     */
+    private function currentSiteId(): int
+    {
+        return Craft::$app->getSites()->getCurrentSite()->id;
     }
 
     /**
@@ -347,14 +398,71 @@ class Verification extends Component
     }
 
     /**
-     * One live URI per template, for templates nothing else covers.
+     * Names what actually gets rendered, which on this site is not the same thing as a template.
      *
-     * @return array<string, string> template => uri
+     * A section template of the form `{% include "_types/" ~ entry.type.handle %}` is one file that
+     * dispatches to several, so crediting the whole section to whichever entry happened to be
+     * picked leaves the rest unwatched while the census reads complete. On the pilot the homepage,
+     * the text pages and the jobs pages all render through the section template that the contact
+     * page already covered, and coverage read 6/6 with the homepage unverified.
+     *
+     * Grouping by entry type instead costs an extra page on sections whose template does not
+     * dispatch, which is a page too many rather than a template too few. Deciding which sections
+     * dispatch would mean parsing Twig, and a parser that is wrong in the other direction reports
+     * coverage the site does not have.
+     */
+    private function renderTarget(string $template, ?string $typeHandle): string
+    {
+        return $typeHandle === null || $typeHandle === '' ? $template : $template . '#' . $typeHandle;
+    }
+
+    /** Live entries, with the entry type that decides what their section template renders. */
+    private function entryTargetsQuery(): Query
+    {
+        return $this->liveEntriesQuery()
+            ->innerJoin(['entrytypes' => Table::ENTRYTYPES], '[[entrytypes.id]] = [[el_type.typeId]]');
+    }
+
+    /**
+     * One live URI per render target, for targets nothing else covers.
+     *
+     * @return array<string, string> render target => uri
      */
     protected function representativeUris(): array
     {
-        $rows = $this->liveEntriesQuery()
-            ->select(['settings.template AS template', 'uri' => new Expression('MIN([[elements_sites.uri]])')])
+        $rows = $this->entryTargetsQuery()
+            ->select([
+                'template' => 'settings.template',
+                'typeHandle' => 'entrytypes.handle',
+                'uri' => new Expression('MIN([[elements_sites.uri]])'),
+            ])
+            ->groupBy(['settings.template', 'entrytypes.handle'])
+            ->all();
+
+        $byTarget = [];
+
+        foreach ($rows as $row) {
+            if (is_string($row['template'] ?? null) && is_string($row['uri'] ?? null)) {
+                $byTarget[$this->renderTarget($row['template'], $row['typeHandle'] ?? null)] = $row['uri'];
+            }
+        }
+
+        return $byTarget;
+    }
+
+    /**
+     * One live URI per category template.
+     *
+     * Categories were counted in the denominator and never offered to selection, so a site with a
+     * category group could not reach full coverage however its manifest was written -- the census
+     * reported a gap that nothing the site did could close.
+     *
+     * @return array<string, string> template => uri
+     */
+    protected function representativeCategoryUris(): array
+    {
+        $rows = $this->routableQuery(Table::CATEGORYGROUPS_SITES, Table::CATEGORIES, 'groupId')
+            ->select(['template' => 'settings.template', 'uri' => new Expression('MIN([[elements_sites.uri]])')])
             ->groupBy(['settings.template'])
             ->all();
 
@@ -370,6 +478,38 @@ class Verification extends Component
     }
 
     /**
+     * Render targets that exist but have nothing live behind them right now.
+     *
+     * Dropping these from the denominator entirely made coverage look complete on a site whose
+     * next published job posting would render through a template nothing has ever photographed --
+     * and the ratio would not move when it did. They are reported separately rather than counted,
+     * because a target with no page is not a gap a manifest could close today.
+     *
+     * @return list<string>
+     */
+    protected function dormantTargets(): array
+    {
+        $rows = $this->routableQuery(Table::SECTIONS_SITES, Table::ENTRIES, 'sectionId')
+            ->innerJoin(['entrytypes' => Table::ENTRYTYPES], '[[entrytypes.id]] = [[el_type.typeId]]')
+            ->select(['template' => 'settings.template', 'typeHandle' => 'entrytypes.handle'])
+            ->distinct()
+            ->all();
+
+        $all = [];
+
+        foreach ($rows as $row) {
+            if (is_string($row['template'] ?? null)) {
+                $all[] = $this->renderTarget($row['template'], $row['typeHandle'] ?? null);
+            }
+        }
+
+        $dormant = array_values(array_diff(array_unique($all), array_keys($this->representativeUris())));
+        sort($dormant);
+
+        return $dormant;
+    }
+
+    /**
      * @return list<string>
      */
     private function routableTemplates(string $settingsTable, string $elementTable, string $foreignKey): array
@@ -378,6 +518,35 @@ class Verification extends Component
             ->select(['settings.template'])
             ->distinct()
             ->column();
+    }
+
+    /**
+     * Which render target each of the given URIs belongs to.
+     *
+     * @param list<string> $uris
+     * @return array<string, string> uri => render target
+     */
+    protected function entryTargetsForUris(array $uris): array
+    {
+        if ($uris === []) {
+            return [];
+        }
+
+        $rows = $this->routableQuery(Table::SECTIONS_SITES, Table::ENTRIES, 'sectionId')
+            ->innerJoin(['entrytypes' => Table::ENTRYTYPES], '[[entrytypes.id]] = [[el_type.typeId]]')
+            ->select(['uri' => 'elements_sites.uri', 'template' => 'settings.template', 'typeHandle' => 'entrytypes.handle'])
+            ->andWhere(['elements_sites.uri' => $uris])
+            ->all();
+
+        $targets = [];
+
+        foreach ($rows as $row) {
+            if (is_string($row['uri'] ?? null) && is_string($row['template'] ?? null)) {
+                $targets[$row['uri']] = $this->renderTarget($row['template'], $row['typeHandle'] ?? null);
+            }
+        }
+
+        return $targets;
     }
 
     /**
@@ -403,12 +572,13 @@ class Verification extends Component
     }
 
     /**
-     * @param list<string> $templates Every template that renders a routable URL, in scope
-     * @param array<string, string> $matched Manifest URI to the template that renders it
+     * @param list<string> $templates Every render target with a live page behind it, in scope
+     * @param array<string, string> $matched Manifest URI to the render target it belongs to
      * @param list<string> $paths The manifest's paths, in their original spelling
-     * @return array{scope: list<string>, templates_total: int, templates_covered: int, uncovered: list<string>, routable_uris: int, unmatched_paths: list<string>}
+     * @param list<string> $dormant Render targets that exist but have nothing live behind them
+     * @return array{scope: list<string>, templates_total: int, templates_covered: int, uncovered: list<string>, dormant: list<string>, routable_uris: int, unmatched_paths: list<string>}
      */
-    public function summariseCoverage(array $templates, array $matched, array $paths, int $routableUris = 0): array
+    public function summariseCoverage(array $templates, array $matched, array $paths, int $routableUris = 0, array $dormant = []): array
     {
         $covered = [];
         $unmatched = [];
@@ -438,6 +608,11 @@ class Verification extends Component
             'templates_total' => count($all),
             'templates_covered' => count($covered),
             'uncovered' => array_slice($uncovered, 0, self::MAX_UNCOVERED),
+            // Not counted against the ratio, because no manifest could cover them today. Reported
+            // so a complete-looking census still says what it could not look at, and so the next
+            // entry published under one of these does not silently render through a template
+            // nothing has ever photographed.
+            'dormant' => array_slice($dormant, 0, self::MAX_UNCOVERED),
             'routable_uris' => $routableUris,
             'unmatched_paths' => $unmatched,
         ];
@@ -452,6 +627,19 @@ class Verification extends Component
         $uri = trim(explode('?', $path)[0], '/');
 
         return $uri === '' ? '__home__' : $uri;
+    }
+
+    /**
+     * The inverse of `pathToUri()`.
+     *
+     * Craft stores the homepage's URI as the literal string `__home__`, and its own URL manager
+     * refuses a request for that path with a 404. Appending a slash to the stored spelling would
+     * therefore generate a page that can never load, and because a generated page is the only
+     * thing watching its template, the whole site would fail to baseline rather than degrade.
+     */
+    protected function uriToPath(string $uri): string
+    {
+        return $uri === '__home__' ? '/' : '/' . $uri;
     }
 
     /**
@@ -565,6 +753,12 @@ class Verification extends Component
                 return null;
             }
 
+            if (in_array(strtolower($selector), self::UNMASKABLE, true)) {
+                $errors[] = sprintf('Page %d masks `%s`, which is the whole page and would leave nothing to check.', $index, $selector);
+
+                return null;
+            }
+
             $masks[] = $selector;
         }
 
@@ -602,7 +796,7 @@ class Verification extends Component
     /**
      * @param list<array{id: string, path: string, assert: array{visible: string}, mask: list<string>}> $pages
      * @param list<string> $errors
-     * @return array{schema_version: int, supported: bool, enabled: bool, valid: bool, pages: list<array{id: string, path: string, assert: array{visible: string}, mask: list<string>}>, errors: list<string>}
+     * @return array{schema_version: int, supported: bool, enabled: bool, valid: bool, pages: list<array{id: string, path: string, assert: array{visible: string}, mask: list<string>}>, errors: list<string>, warnings: list<string>}
      */
     private function result(bool $enabled, bool $valid, array $pages, array $errors): array
     {
@@ -613,6 +807,10 @@ class Verification extends Component
             'valid' => $valid,
             'pages' => $pages,
             'errors' => $errors,
+            // An error means the manifest cannot be used. A warning means it can, but is not the
+            // manifest the site asked for -- which otherwise only the plugin's own log would know,
+            // while the runner reported a clean pass over quietly fewer pages.
+            'warnings' => $this->warnings,
         ];
     }
 }

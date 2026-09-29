@@ -1,5 +1,5 @@
 import type { FullResult, Reporter, TestCase, TestResult } from '@playwright/test/reporter';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runConfig } from './config';
 import { bundlePaths, type CaptureRecord } from './manifest';
@@ -14,7 +14,18 @@ import { bundlePaths, type CaptureRecord } from './manifest';
  */
 type Outcome = 'passed' | 'changes_detected' | 'failed' | 'inconclusive';
 
-const PRECEDENCE: Outcome[] = ['failed', 'inconclusive', 'changes_detected', 'passed'];
+/**
+ * Ordered worst-first, with both observations ahead of the absence of one.
+ *
+ * `failed` and `changes_detected` are things the run saw. `inconclusive` is the run admitting it
+ * saw nothing. Ranking the admission above the observation meant a page whose text had visibly
+ * changed was reported as "could not establish anything", which an operator reasonably reads as
+ * "re-run it later" -- and the change they needed to look at went unread.
+ */
+const PRECEDENCE: Outcome[] = ['failed', 'changes_detected', 'inconclusive', 'passed'];
+
+/** Outcomes that are evidence, and so are never downgraded by an incomplete run. */
+const OBSERVED: Outcome[] = ['failed', 'changes_detected'];
 
 const INCONCLUSIVE = 'INCONCLUSIVE:';
 
@@ -50,6 +61,7 @@ export default class VerificationReporter implements Reporter {
     }
 
     async onEnd(result: FullResult): Promise<void> {
+        const sidecarErrors: string[] = [];
         const pending = this.readRecord(this.paths.pendingCapture) ?? this.readRecord(this.paths.capture);
         const expected = pending?.expected_checks ?? [];
         const ran = this.checks.map((check) => `${check.kind}:${check.id}`);
@@ -57,15 +69,23 @@ export default class VerificationReporter implements Reporter {
 
         const worst = PRECEDENCE.find((candidate) => this.checks.some((check) => check.outcome === candidate)) ?? 'inconclusive';
 
+        const change = this.readJson<unknown>(this.paths.change, sidecarErrors, 'change');
+        const drift = this.readJson<string[]>(this.paths.drift, sidecarErrors, 'manifest_drift') ?? [];
+
         // A report that summarises only the checks that happened to run will call a filtered or
         // partially-collected run a pass, having never executed the assertion that would have
         // caught the defect. Anything the manifest owed and did not deliver is missing evidence.
-        const incomplete = this.checks.length === 0 || missing.length > 0 || result.status === 'interrupted' || result.status === 'timedout';
+        const incomplete =
+            this.checks.length === 0 ||
+            missing.length > 0 ||
+            sidecarErrors.length > 0 ||
+            result.status === 'interrupted' ||
+            result.status === 'timedout';
 
-        // An incomplete run downgrades a pass, never an observed failure. A check that ran and
-        // failed is evidence; burying it because some other check never ran loses the one result
-        // the operator most needs.
-        const overall: Outcome = worst === 'failed' ? 'failed' : incomplete ? 'inconclusive' : worst;
+        // An incomplete run downgrades a pass, never an observation. A check that ran and saw
+        // something is evidence; burying it because some other check never ran loses the one
+        // result the operator most needs. What went missing stays in `missing_checks` either way.
+        const overall: Outcome = OBSERVED.includes(worst) ? worst : incomplete ? 'inconclusive' : worst;
 
         const report = {
             run_id: this.config.runId,
@@ -80,15 +100,24 @@ export default class VerificationReporter implements Reporter {
                 counts[candidate] = this.checks.filter((check) => check.outcome === candidate).length;
                 return counts;
             }, {}),
-            // Recorded, not acted on: the run used the frozen definitions either way, and an
-            // operator reading a clean result needs to know the site has since been redefined.
-            // What the run was verified across, when the loop applied it. A comparison whose
-            // change never landed is a pass about nothing, so it is recorded next to the verdict.
+            // Reported by the site alongside its manifest: the pages below are real, but they are
+            // fewer than the site intended to publish.
+            manifest_warnings: this.readManifestWarnings(),
             // What the run chose not to look at. A clean result is only as meaningful as the
             // coverage behind it, and a mask is coverage deliberately given up.
             masks: this.readMasks(),
-            change: existsSync(this.paths.change) ? (JSON.parse(readFileSync(this.paths.change, 'utf8')) as unknown) : null,
-            manifest_drift: existsSync(this.paths.drift) ? (JSON.parse(readFileSync(this.paths.drift, 'utf8')) as string[]) : [],
+            // How much of each page's text those masks actually removed. The selector list says
+            // what was given up; only the run can say how much, and "we mask one ticker" reads
+            // very differently once it turns out to be most of the page.
+            masked_text_share: this.readMaskedShares(),
+            // What the run was verified across, when the loop applied it. A comparison whose
+            // change never landed is a pass about nothing, so it is recorded next to the verdict.
+            change,
+            // Recorded, not acted on: the run used the frozen definitions either way, and an
+            // operator reading a clean result needs to know the site has since been redefined.
+            manifest_drift: drift,
+            // Named so an unreadable sidecar is a reported condition rather than a lost run.
+            sidecar_errors: sidecarErrors,
             checks: this.checks,
         };
 
@@ -152,6 +181,76 @@ export default class VerificationReporter implements Reporter {
         } catch {
             return {};
         }
+    }
+
+    /**
+     * Reads a sidecar the run writes alongside itself, recording rather than raising on damage.
+     *
+     * These files are written by shell, and an unparseable one used to throw out of `onEnd` and
+     * take the entire report with it -- the comparison had already run, and its result was lost to
+     * a quoting bug in an unrelated field. A run that cannot read its own evidence is
+     * inconclusive, not absent.
+     */
+    private readJson<T>(path: string, errors: string[], label: string): T | null {
+        if (!existsSync(path)) {
+            return null;
+        }
+
+        try {
+            return JSON.parse(readFileSync(path, 'utf8')) as T;
+        } catch (error) {
+            errors.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
+
+            return null;
+        }
+    }
+
+    /**
+     * @return string[]
+     */
+    private readManifestWarnings(): string[] {
+        if (!existsSync(this.paths.manifest)) {
+            return [];
+        }
+
+        try {
+            const manifest = JSON.parse(readFileSync(this.paths.manifest, 'utf8')) as { warnings?: string[] };
+
+            return manifest.warnings ?? [];
+        } catch {
+            return [];
+        }
+    }
+
+    /**
+     * @return Record<string, number>
+     */
+    private readMaskedShares(): Record<string, number> {
+        if (!existsSync(this.paths.masking)) {
+            return {};
+        }
+
+        const shares: Record<string, number> = {};
+
+        try {
+            // One file per page, because Playwright's workers are separate processes and a single
+            // shared file would record whichever worker happened to finish last.
+            for (const entry of readdirSync(this.paths.masking)) {
+                if (!entry.endsWith('.json')) {
+                    continue;
+                }
+
+                const record = JSON.parse(readFileSync(join(this.paths.masking, entry), 'utf8')) as { share?: number };
+
+                if (typeof record.share === 'number') {
+                    shares[entry.replace(/\.json$/, '')] = Math.round(record.share * 1000) / 1000;
+                }
+            }
+        } catch {
+            return shares;
+        }
+
+        return shares;
     }
 
     private readRecord(path: string): CaptureRecord | null {

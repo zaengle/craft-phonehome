@@ -48,6 +48,17 @@ run_half() {
     docker exec -e "PHV_TOKEN=${TOKEN}" -e "PHV_RUN_ID=${RUN_ID}" "$CONTAINER" npm run --silent "$1"
 }
 
+# Encodes one value as a JSON string, rather than wrapping it in quotes and hoping.
+#
+# Composer constraints routinely carry quotes ("vendor/pkg:^2"), and an --apply command may carry
+# backslashes or quotes of its own. Interpolating those raw produced a change.json the reporter
+# could not parse, which lost the entire comparison -- the run appeared to fail during startup
+# rather than to have recorded a result. The encoding runs in the web container because PHP is
+# guaranteed there and jq is not guaranteed on the host.
+json_string() {
+    printf '%s' "$1" | docker exec -i "$WEB" php -r 'echo json_encode(stream_get_contents(STDIN));'
+}
+
 # Fingerprints the installed package versions, not the lockfile.
 #
 # Hashing composer.lock whole reports a change when only metadata moved -- a content-hash, a
@@ -119,7 +130,7 @@ AFTER="$(fingerprint)"
 mkdir -p "$BUNDLE"
 cat > "${BUNDLE}/change.json" <<JSON
 {
-  "applied": $( [ -n "$APPLY" ] && printf '%s' "\"${APPLY}\"" || printf 'null' ),
+  "applied": $( [ -n "$APPLY" ] && json_string "$APPLY" || printf 'null' ),
   "trigger": "$( [ -n "$APPLY" ] && echo "command" || echo "manual" )",
   "lock_before": "${BEFORE}",
   "lock_after": "${AFTER}",

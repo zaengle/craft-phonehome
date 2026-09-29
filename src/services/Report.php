@@ -12,6 +12,7 @@ use craft\helpers\Json;
 use craft\models\UpdateRelease;
 use OutOfBoundsException;
 use RequirementsChecker;
+use Throwable;
 use yii\base\Component;
 use zaengle\phonehome\enums\NpmStatus;
 use zaengle\phonehome\events\RegisterStatusChecksEvent;
@@ -79,6 +80,7 @@ class Report extends Component
             'status_checks' => $this->getStatusChecks(),
             'verification' => PhoneHome::$plugin->verification->getManifest(),
             'verification_coverage' => PhoneHome::$plugin->verification->getCoverage(),
+            'backup_exclusions' => $this->getBackupExclusionInfo(),
         ];
     }
 
@@ -495,6 +497,44 @@ class Report extends Component
      *
      * @return array{at_risk: int, unknown: int, total: int, formats: array<string, int>, tables: list<string>}|null
      */
+    /**
+     * Whether this site's configured backup exclusions still match a real table.
+     *
+     * An exclusion that matches nothing excludes nothing, and the dump it produces is
+     * indistinguishable from one that never held the data -- which is the whole point of the
+     * setting. The plugin already warns in its own log, but nobody reads a log after a backup that
+     * appeared to succeed, so the condition is reported where the fleet can be asked about it.
+     *
+     * @return array{configured: int, matched: int, unmatched: list<string>}|null
+     */
+    protected function getBackupExclusionInfo(): ?array
+    {
+        $settings = PhoneHome::$plugin->getSettings();
+        $configured = count($settings->backupExcludeTables) + count($settings->backupExcludePatterns);
+
+        if ($configured === 0) {
+            return null;
+        }
+
+        try {
+            $resolution = PhoneHome::$plugin->databaseExport->resolveExcludedTables(
+                Craft::$app->getDb()->getSchema()->getTableNames(),
+                $settings->backupExcludeTables,
+                $settings->backupExcludePatterns,
+            );
+        } catch (Throwable $e) {
+            PhoneHome::error('Error resolving backup exclusions: ' . $e->getMessage());
+
+            return null;
+        }
+
+        return [
+            'configured' => $configured,
+            'matched' => count($resolution['matched']),
+            'unmatched' => $resolution['unmatched'],
+        ];
+    }
+
     protected function getRowFormatInfo(): ?array
     {
         $db = Craft::$app->getDb();

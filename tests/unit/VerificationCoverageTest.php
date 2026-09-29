@@ -47,6 +47,34 @@ class VerificationCoverageTest extends TestCase
         $this->assertSame(['blog/_entry.twig', 'team/_entry'], $summary['uncovered']);
     }
 
+    /**
+     * A render target with nothing live behind it cannot be covered by any manifest today, so
+     * counting it would report a permanent gap. Dropping it entirely was worse: the pilot's jobs
+     * template disappeared from the census, and the next posted job would have rendered through a
+     * template nothing had ever photographed without the ratio moving.
+     */
+    public function testADormantTargetIsReportedWithoutBeingCounted(): void
+    {
+        $summary = $this->verification->summariseCoverage(
+            $this->templates,
+            $this->matched,
+            ['/', '/blog/one', '/team/ana'],
+            0,
+            ['jobs/_entry.twig#job'],
+        );
+
+        $this->assertSame(3, $summary['templates_total']);
+        $this->assertSame(3, $summary['templates_covered']);
+        $this->assertSame(['jobs/_entry.twig#job'], $summary['dormant']);
+    }
+
+    public function testASiteWithNothingDormantReportsAnEmptyList(): void
+    {
+        $summary = $this->verification->summariseCoverage($this->templates, $this->matched, ['/']);
+
+        $this->assertSame([], $summary['dormant']);
+    }
+
     public function testCoveringEveryTemplateLeavesNothingUncovered(): void
     {
         $summary = $this->verification->summariseCoverage($this->templates, $this->matched, ['/', '/blog/one', '/team/ana']);

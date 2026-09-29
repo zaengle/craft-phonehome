@@ -20,6 +20,13 @@ export interface Manifest {
     valid: boolean;
     pages: ManifestPage[];
     errors: string[];
+    /**
+     * Conditions that narrowed the manifest without invalidating it -- automatic page selection
+     * failing back to the explicit list, most of all. Absent on bundles frozen before warnings
+     * existed. Recorded rather than acted on: the run is real, it just covers less than the site
+     * asked for, and without this only the site's own log would know.
+     */
+    warnings?: string[];
 }
 
 /** The manifest contract version this runner understands. */
@@ -44,6 +51,7 @@ export function bundlePaths(bundleDir: string) {
         capture: join(bundleDir, 'capture.json'),
         pendingCapture: join(bundleDir, 'capture.pending.json'),
         attempts: join(bundleDir, 'attempts'),
+        masking: join(bundleDir, 'masking'),
         snapshots: join(bundleDir, 'snapshots'),
     };
 }

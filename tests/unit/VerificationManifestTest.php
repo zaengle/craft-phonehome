@@ -121,6 +121,42 @@ class VerificationManifestTest extends TestCase
     }
 
     /**
+     * The runner catches a mask that contains the asserted element, because only a rendered
+     * document knows what contains what. These four contain everything on every document, so
+     * saying so here reports the mistake where it was made rather than at the end of a capture.
+     *
+     * @dataProvider wholePageSelectors
+     */
+    public function testMaskingTheWholePageIsRejected(string $selector): void
+    {
+        $manifest = $this->verification->normalize([
+            'pages' => [
+                ['id' => 'home', 'path' => '/', 'assert' => ['visible' => 'h1'], 'mask' => [$selector]],
+            ],
+        ]);
+
+        $this->assertFalse($manifest['valid']);
+        $this->assertContains(
+            sprintf('Page 0 masks `%s`, which is the whole page and would leave nothing to check.', $selector),
+            $manifest['errors'],
+        );
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function wholePageSelectors(): array
+    {
+        return [
+            'html' => ['html'],
+            'body' => ['body'],
+            'uppercase body' => ['BODY'],
+            'root' => [':root'],
+            'universal' => ['*'],
+        ];
+    }
+
+    /**
      * A mask is coverage given up. Covering the asserted element would leave a check that passes
      * because it is no longer looking at anything, which is worse than having no check.
      */

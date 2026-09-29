@@ -3,6 +3,7 @@
 namespace zaengle\phonehome\tests\unit;
 
 use PHPUnit\Framework\TestCase;
+use zaengle\phonehome\services\Verification;
 use zaengle\phonehome\tests\support\VerificationProbe;
 
 /**
@@ -117,6 +118,139 @@ class AutoCoverageTest extends TestCase
 
         $this->assertSame($explicit, $this->verification->autoCover($explicit));
         $this->assertNotSame([], $this->verification->loggedErrors);
+    }
+
+    /**
+     * The plugin log is not somewhere anyone looks after a clean run. Without this, a narrowed
+     * manifest and an intended one are the same document, and the runner reports a pass over
+     * quietly fewer pages.
+     */
+    public function testAFailedSelectionIsReportedAsAWarningOnTheManifest(): void
+    {
+        $this->verification->failSelection = true;
+
+        $this->verification->autoCover([['id' => 'contact', 'path' => '/contact', 'assert' => ['visible' => 'h1']]]);
+
+        $this->assertSame(
+            ['Automatic page selection failed, so only the explicitly configured pages are verified.'],
+            $this->verification->reportedWarnings(),
+        );
+    }
+
+    /**
+     * Craft stores the homepage's URI as `__home__` and then 404s a request for that literal path.
+     * Generating `/__home__` would make the homepage's template permanently unbaselineable, and
+     * because a generated page is often the only thing watching a template, the run would fail
+     * outright rather than lose one page.
+     */
+    public function testTheHomepageIsGeneratedAsARootPath(): void
+    {
+        $this->verification->representatives = ['_pages/_home.twig' => '__home__'];
+
+        $pages = $this->verification->autoCover([]);
+
+        $this->assertSame('/', $pages[0]['path']);
+    }
+
+    /**
+     * The homepage declared explicitly is the same page by another spelling, so it must suppress
+     * the generated one rather than being watched twice under two ids.
+     */
+    public function testAnExplicitHomepageSuppressesTheGeneratedOne(): void
+    {
+        $this->verification->representatives = ['_pages/_home.twig' => '__home__'];
+        $this->verification->explicitTemplates = ['__home__' => '_pages/_home.twig'];
+
+        $pages = $this->verification->autoCover([
+            ['id' => 'home', 'path' => '/', 'assert' => ['visible' => 'h1']],
+        ]);
+
+        $this->assertSame(['home'], array_column($pages, 'id'));
+    }
+
+    /**
+     * The defect this exists to prevent: a section template that dispatches on entry type is one
+     * file rendering several, so crediting the whole section to one entry left the pilot's homepage
+     * unwatched while coverage read complete.
+     */
+    public function testEachEntryTypeBehindOneTemplateGetsItsOwnPage(): void
+    {
+        $this->verification->representatives = [
+            '_pages/_page.twig#landingPage' => '__home__',
+            '_pages/_page.twig#forms' => 'contact',
+            '_pages/_page.twig#textPage' => 'privacy',
+        ];
+        $this->verification->explicitTemplates = ['contact' => '_pages/_page.twig#forms'];
+
+        $pages = $this->verification->autoCover([
+            ['id' => 'contact', 'path' => '/contact', 'assert' => ['visible' => 'form.fui-form']],
+        ]);
+
+        $this->assertSame(['/contact', '/', '/privacy'], array_column($pages, 'path'));
+    }
+
+    /**
+     * Generating past the manifest's page limit fails validation, which would leave a large site
+     * with no verification at all rather than partial verification. What did not fit has no page,
+     * so the coverage census reports it as uncovered.
+     */
+    public function testGenerationStopsAtThePageLimitInsteadOfInvalidatingTheManifest(): void
+    {
+        $this->verification->representatives = [];
+
+        for ($i = 0; $i < Verification::MAX_PAGES + 5; $i++) {
+            $this->verification->representatives["template-$i.twig"] = "page-$i";
+        }
+
+        $pages = $this->verification->autoCover([]);
+
+        $this->assertCount(Verification::MAX_PAGES, $pages);
+    }
+
+    /**
+     * Explicit pages are the site's own choices and are never displaced by generated ones, even
+     * when there is no room left.
+     */
+    public function testTheLimitIsSpentOnExplicitPagesFirst(): void
+    {
+        $explicit = [];
+
+        for ($i = 0; $i < Verification::MAX_PAGES; $i++) {
+            $explicit[] = ['id' => "chosen-$i", 'path' => "/chosen-$i", 'assert' => ['visible' => 'h1']];
+        }
+
+        $pages = $this->verification->autoCover($explicit);
+
+        $this->assertSame($explicit, $pages);
+    }
+
+    /**
+     * Category templates are counted in the coverage denominator, so leaving them out of selection
+     * meant a site with a category group could not reach full coverage however its manifest was
+     * written. The pilot read 9 of 10 for exactly this reason.
+     */
+    public function testCategoryTemplatesAreOfferedToSelectionToo(): void
+    {
+        $this->verification->representatives = ['blog/_entry.twig#blog' => 'blog/one'];
+        $this->verification->categoryRepresentatives = ['blog/index.twig' => 'blog/tag/craft'];
+
+        $pages = $this->verification->autoCover([]);
+
+        $this->assertSame(['/blog/one', '/blog/tag/craft'], array_column($pages, 'path'));
+    }
+
+    /**
+     * A shared template is one render target, and the entry side owns it: its representative is
+     * chosen with the live-entry rules that a category has no equivalent of.
+     */
+    public function testAnEntryTargetKeepsATemplateACategoryGroupAlsoRenders(): void
+    {
+        $this->verification->representatives = ['shared.twig' => 'from-entries'];
+        $this->verification->categoryRepresentatives = ['shared.twig' => 'from-categories'];
+
+        $pages = $this->verification->autoCover([]);
+
+        $this->assertSame(['/from-entries'], array_column($pages, 'path'));
     }
 
     public function testASiteWithNoRoutableTemplatesGeneratesNothing(): void
