@@ -114,7 +114,7 @@ async function prepareCapture(): Promise<void> {
         completed_at: '',
         runner_contract: RUNNER_CONTRACT,
         site: { ...readIdentity(report.payload), origin: config.origin, api_origin: config.apiOrigin },
-        settings: { full_page: config.fullPage, viewport: VIEWPORT },
+        settings: { full_page: config.fullPage, viewport: VIEWPORT, stability_samples: config.stabilitySamples },
         environment: renderEnvironment(),
         expected_checks: expectedChecks(report.manifest),
     };

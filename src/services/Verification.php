@@ -2,6 +2,9 @@
 
 namespace zaengle\phonehome\services;
 
+use craft\db\Query;
+use craft\db\Table;
+use Throwable;
 use yii\base\Component;
 use zaengle\phonehome\PhoneHome;
 
@@ -29,6 +32,12 @@ class Verification extends Component
      * runner to an unbounded amount of browser work.
      */
     public const MAX_PAGES = 10;
+
+    /**
+     * @var int Most uncovered template names to report. The counts stay exact; the list is bounded
+     * so a site with many templates cannot bloat every report it sends.
+     */
+    public const MAX_UNCOVERED = 25;
 
     /**
      * @var string[] The keys a page definition may contain. An unrecognised key is an error rather
@@ -130,6 +139,160 @@ class Verification extends Component
         }
 
         return $this->result(enabled: true, valid: true, pages: $normalized, errors: []);
+    }
+
+    /**
+     * Reports how much of what the site actually renders the manifest watches.
+     *
+     * Counting pages is close to meaningless -- five entries out of twenty thousand sounds like
+     * nothing, and is fine. What matters is templates: a page list that exercises every template
+     * the site renders will catch a broken template, and one that misses a template cannot, however
+     * many pages it names.
+     *
+     * Returns null when the question could not be answered, which a consumer must not read as full
+     * coverage.
+     *
+     * @return array{scope: list<string>, templates_total: int, templates_covered: int, uncovered: list<string>, routable_uris: int, unmatched_paths: list<string>}|null
+     */
+    public function getCoverage(): ?array
+    {
+        $manifest = $this->getManifest();
+
+        if (!$manifest['enabled'] || !$manifest['valid']) {
+            return null;
+        }
+
+        $paths = array_column($manifest['pages'], 'path');
+        $uris = array_map(fn(string $path): string => $this->pathToUri($path), $paths);
+
+        try {
+            // Aggregated in the database and narrowed to the manifest's own URIs. Reading every
+            // routable URI into PHP is fine on a small site and ruinous on a large one, and this
+            // runs on every ping.
+            $templates = array_values(array_unique(array_merge(
+                $this->routableTemplates(Table::SECTIONS_SITES, Table::ENTRIES, 'sectionId'),
+                $this->routableTemplates(Table::CATEGORYGROUPS_SITES, Table::CATEGORIES, 'groupId'),
+            )));
+
+            $matched = array_merge(
+                $this->templatesForUris(Table::SECTIONS_SITES, Table::ENTRIES, 'sectionId', $uris),
+                $this->templatesForUris(Table::CATEGORYGROUPS_SITES, Table::CATEGORIES, 'groupId', $uris),
+            );
+
+            $routableUris = $this->countRoutableUris();
+        } catch (Throwable $e) {
+            PhoneHome::error('Error reading template coverage: ' . $e->getMessage());
+
+            return null;
+        }
+
+        return $this->summariseCoverage($templates, $matched, $paths, $routableUris);
+    }
+
+    /**
+     * Base query over one element type's routable rows, shared by the aggregate lookups below.
+     */
+    private function routableQuery(string $settingsTable, string $elementTable, string $foreignKey): Query
+    {
+        return (new Query())
+            ->from(['settings' => $settingsTable])
+            ->innerJoin(['el_type' => $elementTable], "[[el_type.$foreignKey]] = [[settings.$foreignKey]]")
+            ->innerJoin(
+                ['elements_sites' => Table::ELEMENTS_SITES],
+                '[[elements_sites.elementId]] = [[el_type.id]] AND [[elements_sites.siteId]] = [[settings.siteId]]',
+            )
+            ->innerJoin(['elements' => Table::ELEMENTS], '[[elements.id]] = [[el_type.id]]')
+            ->where(['settings.hasUrls' => true, 'elements_sites.enabled' => true])
+            ->andWhere(['not', ['elements_sites.uri' => null]])
+            ->andWhere(['not', ['elements_sites.uri' => '']])
+            ->andWhere(['not', ['settings.template' => null]])
+            ->andWhere(['not', ['settings.template' => '']])
+            ->andWhere(['elements.dateDeleted' => null, 'elements.revisionId' => null, 'elements.draftId' => null]);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function routableTemplates(string $settingsTable, string $elementTable, string $foreignKey): array
+    {
+        return $this->routableQuery($settingsTable, $elementTable, $foreignKey)
+            ->select(['settings.template'])
+            ->distinct()
+            ->column();
+    }
+
+    /**
+     * @param list<string> $uris
+     * @return array<string, string>
+     */
+    private function templatesForUris(string $settingsTable, string $elementTable, string $foreignKey, array $uris): array
+    {
+        if ($uris === []) {
+            return [];
+        }
+
+        return $this->routableQuery($settingsTable, $elementTable, $foreignKey)
+            ->select(['elements_sites.uri AS uri', 'settings.template AS template'])
+            ->andWhere(['elements_sites.uri' => $uris])
+            ->pairs();
+    }
+
+    private function countRoutableUris(): int
+    {
+        return (int)$this->routableQuery(Table::SECTIONS_SITES, Table::ENTRIES, 'sectionId')->count('[[elements_sites.id]]')
+            + (int)$this->routableQuery(Table::CATEGORYGROUPS_SITES, Table::CATEGORIES, 'groupId')->count('[[elements_sites.id]]');
+    }
+
+    /**
+     * @param list<string> $templates Every template that renders a routable URL, in scope
+     * @param array<string, string> $matched Manifest URI to the template that renders it
+     * @param list<string> $paths The manifest's paths, in their original spelling
+     * @return array{scope: list<string>, templates_total: int, templates_covered: int, uncovered: list<string>, routable_uris: int, unmatched_paths: list<string>}
+     */
+    public function summariseCoverage(array $templates, array $matched, array $paths, int $routableUris = 0): array
+    {
+        $covered = [];
+        $unmatched = [];
+
+        foreach ($paths as $path) {
+            $uri = $this->pathToUri($path);
+
+            if (isset($matched[$uri])) {
+                $covered[$matched[$uri]] = true;
+            } else {
+                // Not an error. A manifest may legitimately name a custom route or an element type
+                // outside the counted scope, which has no template to attribute coverage to -- but
+                // it also cannot be credited as covering anything, so it is reported.
+                $unmatched[] = $path;
+            }
+        }
+
+        $all = array_fill_keys(array_filter($templates, static fn(mixed $t): bool => is_string($t) && $t !== ''), true);
+        $uncovered = array_keys(array_diff_key($all, $covered));
+        sort($uncovered);
+
+        return [
+            // Named so a consumer knows what the denominator counted. Element types outside this
+            // list render through templates nobody here is measuring, and a percentage that does
+            // not say what it is over invites being read as the whole site.
+            'scope' => ['entries', 'categories'],
+            'templates_total' => count($all),
+            'templates_covered' => count($covered),
+            'uncovered' => array_slice($uncovered, 0, self::MAX_UNCOVERED),
+            'routable_uris' => $routableUris,
+            'unmatched_paths' => $unmatched,
+        ];
+    }
+
+    /**
+     * Converts a manifest path to the URI spelling Craft stores, where the homepage is `__home__`
+     * and nothing else carries a leading slash.
+     */
+    private function pathToUri(string $path): string
+    {
+        $uri = trim(explode('?', $path)[0], '/');
+
+        return $uri === '' ? '__home__' : $uri;
     }
 
     /**

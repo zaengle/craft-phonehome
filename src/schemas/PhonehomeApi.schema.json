@@ -548,6 +548,56 @@
           }
         }
       }
+    },
+    "verification_coverage": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "How much of what the site renders the manifest watches. Null when it could not be answered, which must not be read as full coverage. Counting pages is close to meaningless; templates are the measure that predicts whether a break would be caught.",
+      "required": [
+        "scope",
+        "templates_total",
+        "templates_covered",
+        "uncovered",
+        "routable_uris",
+        "unmatched_paths"
+      ],
+      "properties": {
+        "scope": {
+          "type": "array",
+          "description": "Element types counted in the denominator; anything outside this renders through templates nobody is measuring",
+          "items": {
+            "type": "string"
+          }
+        },
+        "templates_total": {
+          "type": "integer",
+          "description": "Distinct templates that render a routable URL"
+        },
+        "templates_covered": {
+          "type": "integer",
+          "description": "Of those, how many at least one manifest page renders through"
+        },
+        "uncovered": {
+          "type": "array",
+          "description": "Templates no manifest page exercises, bounded; the counts stay exact",
+          "items": {
+            "type": "string"
+          }
+        },
+        "routable_uris": {
+          "type": "integer",
+          "description": "Routable URLs in scope, context for the template numbers rather than a coverage measure itself"
+        },
+        "unmatched_paths": {
+          "type": "array",
+          "description": "Manifest paths that resolve to no element in scope, such as a custom route; they cannot be credited as covering a template",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
     }
   }
 }

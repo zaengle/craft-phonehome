@@ -225,6 +225,7 @@ export interface CaptureRecord {
     settings: {
         full_page: boolean;
         viewport: { width: number; height: number };
+        stability_samples?: number;
     };
     environment: RenderEnvironment;
     expected_checks: string[];

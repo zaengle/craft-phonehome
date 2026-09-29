@@ -13,6 +13,38 @@ const paths = bundlePaths(config.bundleDir);
  */
 const INCONCLUSIVE = 'INCONCLUSIVE:';
 
+/** Marks a page that cannot be baselined because it does not render the same way twice. */
+const UNSTABLE = 'UNSTABLE:';
+
+/**
+ * Masked elements are replaced with a marker rather than removed, so the page's shape is still
+ * compared. Deleting their text instead would mean a masked block disappearing entirely looked
+ * identical to it simply having nothing to say.
+ */
+async function readMaskedText(browserPage: Page, selectors: string[]): Promise<string> {
+    return browserPage.evaluate((masks: string[]) => {
+        for (const selector of masks) {
+            for (const element of Array.from(document.querySelectorAll(selector))) {
+                element.textContent = '[masked]';
+            }
+        }
+
+        return (document.body.innerText ?? '').replace(/\s+/g, ' ').trim();
+    }, selectors);
+}
+
+/** Shows where two renderings first diverge, so the varying block is identifiable at a glance. */
+function firstDifference(texts: string[]): string {
+    const [a, b] = texts;
+    let index = 0;
+
+    while (index < a.length && index < b.length && a[index] === b[index]) {
+        index++;
+    }
+
+    return `…${a.slice(Math.max(0, index - 40), index + 50)}… vs …${b.slice(Math.max(0, index - 40), index + 50)}…`;
+}
+
 
 const EXPECTED_ORIGIN = new URL(config.origin).origin;
 
@@ -110,24 +142,32 @@ if (existsSync(paths.abort)) {
          * which is the right instrument for the thing most likely to go missing in a deploy.
          */
         test(`text:${page.id}`, async ({ page: browserPage }) => {
-            const response = await visit(browserPage, page.path);
+            // Capture renders the page several times and refuses to record a baseline unless every
+            // rendering agrees. A page that varies per request -- a randomised block, a relative
+            // timestamp -- produces a baseline that is simply one of its possible outputs, and then
+            // reports a change on most runs afterwards. Establishing that here is the difference
+            // between finding it now and finding it as an unexplained failure in a month.
+            const samples = config.mode === 'capture' ? config.stabilitySamples : 1;
+            const seen = new Map<string, number>();
+            let text = '';
 
-            if (response.status() >= 400) {
-                throw new Error(`${INCONCLUSIVE} unreachable — ${page.path} returned ${response.status()}.`);
-            }
+            for (let attempt = 0; attempt < samples; attempt++) {
+                const response = await visit(browserPage, page.path);
 
-            // Masked elements are replaced with a marker rather than removed, so the page's
-            // shape is still compared. Deleting their text instead would mean a masked block
-            // disappearing entirely looked identical to it simply having nothing to say.
-            const text = await browserPage.evaluate((selectors: string[]) => {
-                for (const selector of selectors) {
-                    for (const element of Array.from(document.querySelectorAll(selector))) {
-                        element.textContent = '[masked]';
-                    }
+                if (response.status() >= 400) {
+                    throw new Error(`${INCONCLUSIVE} unreachable — ${page.path} returned ${response.status()}.`);
                 }
 
-                return (document.body.innerText ?? '').replace(/\s+/g, ' ').trim();
-            }, page.mask ?? []);
+                text = await readMaskedText(browserPage, page.mask ?? []);
+                seen.set(text, (seen.get(text) ?? 0) + 1);
+            }
+
+            if (seen.size > 1) {
+                throw new Error(
+                    `${UNSTABLE} ${page.path} rendered ${seen.size} different ways across ${samples} loads, so no baseline was recorded. ` +
+                        `Mask whatever varies, or drop the page from the manifest. First difference: ${firstDifference([...seen.keys()])}`,
+                );
+            }
 
             expect(text).toMatchSnapshot(`${page.id}.txt`);
         });

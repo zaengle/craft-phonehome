@@ -78,6 +78,7 @@ class Report extends Component
             'meta' => $this->getMetaInfo(),
             'status_checks' => $this->getStatusChecks(),
             'verification' => PhoneHome::$plugin->verification->getManifest(),
+            'verification_coverage' => PhoneHome::$plugin->verification->getCoverage(),
         ];
     }
 

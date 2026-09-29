@@ -194,7 +194,9 @@ export default class VerificationReporter implements Reporter {
             return this.config.mode === 'compare' ? 'changes_detected' : 'failed';
         }
 
-        if (/toBeVisible|toBeLessThan/.test(message)) {
+        // A page that will not render the same way twice is a definite, actionable problem with
+        // the page or the manifest -- not an inability to check -- and it must stop the baseline.
+        if (message.includes('UNSTABLE:') || /toBeVisible|toBeLessThan/.test(message)) {
             return 'failed';
         }
 

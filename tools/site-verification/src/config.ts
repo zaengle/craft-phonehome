@@ -27,6 +27,8 @@ export interface RunConfig {
     fullPage: boolean;
     /** Refuse a full-page capture taller than this, in CSS pixels. */
     maxFullPageHeight: number;
+    /** How many times capture renders each page to establish it is reproducible. 1 disables. */
+    stabilitySamples: number;
 }
 
 function required(name: string): string {
@@ -88,6 +90,10 @@ export function runConfig(): RunConfig {
         insecureTls: process.env.PHV_INSECURE_TLS === '1',
         fullPage: process.env.PHV_FULL_PAGE === '1',
         maxFullPageHeight: Number(process.env.PHV_MAX_FULL_PAGE_HEIGHT ?? 20_000),
+        // Five, not two. A page that renders two distinct ways across eight loads -- which a real
+        // one on this pilot does -- passes a two-sample check most of the time, and then produces
+        // a spurious change weeks later when nobody is expecting it.
+        stabilitySamples: Math.max(1, Number(process.env.PHV_STABILITY_SAMPLES ?? 5)),
         replace: process.env.PHV_REPLACE === '1',
         // Resolved here rather than at each use. Two callers each defaulting to Date.now() disagree
         // by a millisecond and quietly write one run's evidence into two directories.
