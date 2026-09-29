@@ -1,0 +1,193 @@
+# Prepares a security remediation and proves it before anyone is asked to merge it.
+#
+# Dispatched by Phone Home, which holds `actions: write` and nothing more. Every write to this
+# repository is made here, by this workflow, with the token GitHub issues to this job — scoped to
+# this repository, granted by whoever merged this file, and expiring when the job ends.
+#
+# The result is a DRAFT pull request carrying its own verification. Nothing here merges anything,
+# and a failed verification still opens the pull request: the evidence is the point, and a failure
+# nobody can see is worse than one attached to a draft.
+name: Prepare security remediation
+
+on:
+  workflow_call:
+    inputs:
+      patch_id: { required: true, type: string }
+      branch:
+        description: 'Derived by Phone Home, so a repeat dispatch names the same branch.'
+        required: true
+        type: string
+      package:
+        description: 'The Composer package to move, e.g. craftcms/cms.'
+        required: true
+        type: string
+      version: { required: true, type: string }
+      verify_origin:
+        description: 'The environment the change is verified against. Never production.'
+        required: true
+        type: string
+      dashboard_origin: { required: true, type: string }
+      php_version: { required: false, type: string, default: '8.3' }
+      runner_ref: { required: false, type: string, default: 'main' }
+    secrets:
+      phonehome_token: { required: true }
+      composer_auth:
+        description: 'COMPOSER_AUTH json, if this site resolves commercial Craft plugins.'
+        required: false
+      basic_auth_user: { required: false }
+      basic_auth_password: { required: false }
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      existing: ${{ steps.branch.outputs.existing }}
+      moved: ${{ steps.resolve.outputs.moved }}
+      count: ${{ steps.resolve.outputs.count }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # A branch that already exists is a dispatch that already happened. Re-running must not
+      # force-push over a pull request somebody is reading, and two patches in flight for one site
+      # must not collide.
+      - name: Check whether this branch already exists
+        id: branch
+        run: |
+          if git ls-remote --exit-code --heads origin "${{ inputs.branch }}" >/dev/null 2>&1; then
+            echo "::notice::${{ inputs.branch }} already exists; nothing to prepare."
+            echo "existing=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "existing=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: shivammathur/setup-php@v2
+        if: steps.branch.outputs.existing == '0'
+        with:
+          php-version: ${{ inputs.php_version }}
+
+      - name: Resolve the change
+        id: resolve
+        if: steps.branch.outputs.existing == '0'
+        env:
+          COMPOSER_AUTH: ${{ secrets.composer_auth }}
+        run: |
+          git switch -c "${{ inputs.branch }}"
+          cp composer.lock composer.lock.before
+
+          # --with-dependencies, because a Craft plugin security release frequently cannot move
+          # without craftcms/cms moving with it. What that drags along is reported rather than
+          # assumed to be small.
+          composer update "${{ inputs.package }}:${{ inputs.version }}" --with-dependencies --no-interaction --no-scripts
+
+          moved="$(php -r '
+            $read = fn(string $f): array => array_column(json_decode(file_get_contents($f), true)["packages"] ?? [], "version", "name");
+            $before = $read("composer.lock.before");
+            $after = $read("composer.lock");
+            $changed = [];
+            foreach ($after as $name => $version) {
+              if (($before[$name] ?? null) !== $version) { $changed[] = $name . " " . ($before[$name] ?? "new") . " -> " . $version; }
+            }
+            echo implode("\n", $changed);
+          ')"
+
+          rm composer.lock.before
+          echo "count=$(printf '%s' "$moved" | grep -c . || true)" >> "$GITHUB_OUTPUT"
+          {
+            echo 'moved<<MOVED'
+            printf '%s\n' "$moved"
+            echo 'MOVED'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Push the branch
+        if: steps.branch.outputs.existing == '0'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add composer.lock composer.json
+          git commit -m "Security: ${{ inputs.package }} to ${{ inputs.version }} (patch #${{ inputs.patch_id }})"
+          git push --set-upstream origin "${{ inputs.branch }}"
+
+      # Deploying the branch is site-specific and deliberately not guessed at here. Without it the
+      # verification measures the environment as it already was, which the pull request says
+      # plainly rather than implying the change was proven.
+      - name: Deploy the branch to the verification environment
+        if: steps.branch.outputs.existing == '0'
+        run: echo "::warning::No deploy step is wired in, so the verification did not render this branch."
+
+  verify:
+    needs: prepare
+    if: needs.prepare.outputs.existing == '0'
+    # A failed verification must still reach a pull request. That is the result worth seeing.
+    continue-on-error: true
+    uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@main
+    with:
+      mode: compare
+      run_id: remediation-${{ inputs.patch_id }}-${{ github.run_id }}
+      origin: ${{ inputs.verify_origin }}
+      dashboard_origin: ${{ inputs.dashboard_origin }}
+      patch_id: ${{ inputs.patch_id }}
+      runner_ref: ${{ inputs.runner_ref }}
+    secrets:
+      phonehome_token: ${{ secrets.phonehome_token }}
+      basic_auth_user: ${{ secrets.basic_auth_user }}
+      basic_auth_password: ${{ secrets.basic_auth_password }}
+
+  pull_request:
+    needs: [prepare, verify]
+    if: always() && needs.prepare.outputs.existing == '0'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Open a draft pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MOVED: ${{ needs.prepare.outputs.moved }}
+          COUNT: ${{ needs.prepare.outputs.count }}
+          VERIFICATION: ${{ needs.verify.result }}
+        run: |
+          # A security patch that moves three packages and one that moves fifty are different things
+          # to review, and the second should not arrive looking like the first.
+          scale=""
+          if [ "${COUNT:-0}" -gt 10 ]; then
+            scale="> [!WARNING]
+          > This moves ${COUNT} packages. That is a dependency bump which happens to contain a security fix, not a security patch — review it as one."
+          fi
+
+          {
+            echo "Prepared by Phone Home for patch #${{ inputs.patch_id }}."
+            echo
+            [ -n "$scale" ] && echo "$scale" && echo
+            echo "**What moved**"
+            echo
+            echo '```'
+            echo "$MOVED"
+            echo '```'
+            echo
+            echo "**Verification** — \`${VERIFICATION}\` against ${{ inputs.verify_origin }}."
+            echo "The full result, including before and after screenshots of anything that changed,"
+            echo "is on the patch in Phone Home."
+            echo
+            echo "Opened as a draft on purpose. Nobody has merged anything."
+          } > /tmp/pr-body.md
+
+          url="$(gh pr create --draft --base "${{ github.ref_name }}" --head "${{ inputs.branch }}" \
+            --title "Security: ${{ inputs.package }} to ${{ inputs.version }}" --body-file /tmp/pr-body.md)"
+
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Tell Phone Home where the pull request is
+        if: steps.pr.outputs.url != ''
+        run: |
+          curl -sS --fail-with-body -X POST "${{ inputs.dashboard_origin }}/api/patches/${{ inputs.patch_id }}/remediation" \
+            -H "X-Auth-Token: ${{ secrets.phonehome_token }}" \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json' \
+            -d "{\"pull_request_url\":\"${{ steps.pr.outputs.url }}\"}"
