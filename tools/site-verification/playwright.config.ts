@@ -15,6 +15,8 @@ import {
     RUNNER_CONTRACT,
     writeBundle,
     type Abort,
+    baselineExists,
+    pullBaseline,
     type CaptureRecord,
 } from './src/manifest';
 
@@ -80,6 +82,21 @@ async function prepareBundle(): Promise<void> {
 async function prepareCapture(): Promise<void> {
     const existing = readCaptureRecord(config.bundleDir);
 
+    // Asked before any work starts, and only when there is nothing local to judge by -- which is
+    // every CI job, and the case where the local refusal below cannot fire at all.
+    if (existing === null && !config.replace && config.dashboardOrigin !== null) {
+        const held = await baselineExists(config.dashboardOrigin, config.token, config.runId, config.dashboardInsecureTls);
+
+        if (held) {
+            abort('bundle_exists', [
+                `${config.dashboardOrigin} already holds a sealed baseline for ${config.runId}.`,
+                'Use a new run id, or set PHV_REPLACE=1 to deliberately replace it.',
+            ]);
+
+            return;
+        }
+    }
+
     if (existing !== null && !config.replace) {
         // A completed baseline is evidence. Silently overwriting one means a comparison that found
         // a regression can be made to pass by re-running capture, and nothing records that the
@@ -123,6 +140,19 @@ async function prepareCapture(): Promise<void> {
 }
 
 async function prepareCompare(): Promise<void> {
+    // A comparison may be running somewhere that has never seen the capture -- a CI job, a second
+    // machine, a container that did not exist an hour ago. If the dashboard holds the bundle, it is
+    // rebuilt here before anything reads it, which is what makes the runner disposable.
+    if (readCaptureRecord(config.bundleDir) === null && config.dashboardOrigin !== null) {
+        const pulled = await pullBaseline(config.dashboardOrigin, config.token, config.runId, config.bundleDir, config.dashboardInsecureTls);
+
+        process.stdout.write(
+            pulled.ok
+                ? `Restored the baseline for ${config.runId} from ${config.dashboardOrigin} (${pulled.detail})\n`
+                : `No local baseline, and none could be restored: ${pulled.detail}\n`,
+        );
+    }
+
     const record = readCaptureRecord(config.bundleDir);
 
     if (record === null) {

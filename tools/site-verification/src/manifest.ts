@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
@@ -139,6 +140,198 @@ function parseRunId(body: string): number | null {
         return typeof parsed.id === 'number' ? parsed.id : null;
     } catch {
         return null;
+    }
+}
+
+/**
+ * A request to the dashboard, with the site token attached.
+ *
+ * Shared by every baseline call so the transport, the timeout and the TLS decision are written
+ * once. Bodies come back as a Buffer because half of these are PNGs.
+ */
+function dashboardRequest(
+    url: string,
+    token: string,
+    insecureTls: boolean,
+    options: { method?: string; body?: Buffer | string; headers?: Record<string, string | number> } = {},
+): Promise<{ status: number; body: Buffer }> {
+    const target = new URL(url);
+    const send = target.protocol === 'https:' ? httpsRequest : httpRequest;
+    const body = options.body;
+
+    return new Promise((resolve, reject) => {
+        const req = send(
+            target,
+            {
+                method: options.method ?? 'GET',
+                timeout: 30_000,
+                rejectUnauthorized: !insecureTls,
+                headers: {
+                    'X-Auth-Token': token,
+                    Accept: 'application/json',
+                    ...(body === undefined ? {} : { 'Content-Length': Buffer.byteLength(body) }),
+                    ...options.headers,
+                },
+            },
+            (res) => {
+                const chunks: Buffer[] = [];
+                res.on('data', (chunk: Buffer) => chunks.push(chunk));
+                res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks) }));
+            },
+        );
+
+        req.on('timeout', () => req.destroy(new Error('timed out after 30s')));
+        req.on('error', reject);
+        req.end(body);
+    });
+}
+
+/**
+ * Sends a completed bundle to the dashboard: the frozen manifest, its provenance, and every
+ * snapshot.
+ *
+ * Sealed last and separately, so a push that dies halfway leaves something obviously unfinished
+ * rather than a baseline quietly missing a page. The dashboard refuses to serve an unsealed one.
+ */
+export async function pushBaseline(
+    dashboardOrigin: string,
+    token: string,
+    runId: string,
+    bundleDir: string,
+    insecureTls: boolean,
+    replace: boolean,
+): Promise<{ ok: boolean; detail: string }> {
+    const paths = bundlePaths(bundleDir);
+
+    if (!existsSync(paths.manifest) || !existsSync(paths.capture)) {
+        return { ok: false, detail: 'no completed capture to push' };
+    }
+
+    try {
+        const opened = await dashboardRequest(`${dashboardOrigin}/api/verification-baselines`, token, insecureTls, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                run_id: runId,
+                manifest: JSON.parse(readFileSync(paths.manifest, 'utf8')) as unknown,
+                record: JSON.parse(readFileSync(paths.capture, 'utf8')) as unknown,
+                // Carried through rather than assumed. A capture that reached this point cleared
+                // whatever was on disk, but the dashboard's copy is the one a CI job would read,
+                // and replacing that is a decision somebody has to have made.
+                replace,
+            }),
+        });
+
+        if (opened.status !== 201) {
+            return { ok: false, detail: `HTTP ${opened.status} ${opened.body.toString('utf8').slice(0, 200)}` };
+        }
+
+        const { id } = JSON.parse(opened.body.toString('utf8')) as { id: number };
+        const names = existsSync(paths.snapshots) ? readdirSync(paths.snapshots) : [];
+
+        for (const name of names) {
+            const response = await dashboardRequest(`${dashboardOrigin}/api/verification-baselines/${id}/files`, token, insecureTls, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/octet-stream', 'X-Baseline-File': name },
+                body: readFileSync(join(paths.snapshots, name)),
+            });
+
+            if (response.status !== 201) {
+                return { ok: false, detail: `${name}: HTTP ${response.status}` };
+            }
+        }
+
+        const sealed = await dashboardRequest(`${dashboardOrigin}/api/verification-baselines/${id}/seal`, token, insecureTls, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}',
+        });
+
+        return sealed.status === 200
+            ? { ok: true, detail: `${names.length} snapshot(s) stored` }
+            : { ok: false, detail: `seal: HTTP ${sealed.status}` };
+    } catch (error) {
+        return { ok: false, detail: error instanceof Error ? error.message : String(error) };
+    }
+}
+
+/**
+ * Whether the dashboard already holds a sealed baseline under this run id.
+ *
+ * Without this, a capture running where no local bundle exists -- which is every CI job -- would
+ * silently replace a sealed reference. That is precisely the failure the local `bundle_exists`
+ * refusal prevents: a comparison that found a regression could be made to pass by re-capturing,
+ * with nothing recording that the reference moved.
+ *
+ * A dashboard that cannot be reached answers false. The local refusal still applies, and refusing
+ * to capture because a network call failed would be worse than the risk it guards against.
+ */
+export async function baselineExists(dashboardOrigin: string, token: string, runId: string, insecureTls: boolean): Promise<boolean> {
+    try {
+        const response = await dashboardRequest(`${dashboardOrigin}/api/verification-baselines/${encodeURIComponent(runId)}`, token, insecureTls);
+
+        return response.status === 200;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Rebuilds a bundle on disk from the dashboard's copy.
+ *
+ * This is what lets a comparison run somewhere that has never seen the capture. Every file is
+ * checked against the checksum the dashboard recorded: a baseline that arrived corrupted would
+ * otherwise become the reference every future comparison is held against, and the diff it produced
+ * would look like a change to the site.
+ */
+export async function pullBaseline(
+    dashboardOrigin: string,
+    token: string,
+    runId: string,
+    bundleDir: string,
+    insecureTls: boolean,
+): Promise<{ ok: boolean; detail: string }> {
+    const paths = bundlePaths(bundleDir);
+
+    try {
+        const response = await dashboardRequest(`${dashboardOrigin}/api/verification-baselines/${encodeURIComponent(runId)}`, token, insecureTls);
+
+        if (response.status !== 200) {
+            return { ok: false, detail: `HTTP ${response.status}` };
+        }
+
+        const payload = JSON.parse(response.body.toString('utf8')) as {
+            manifest: unknown;
+            record: unknown;
+            files: { name: string; checksum: string; url: string }[];
+        };
+
+        mkdirSync(paths.snapshots, { recursive: true });
+
+        for (const file of payload.files) {
+            const download = await dashboardRequest(file.url, token, insecureTls);
+
+            if (download.status !== 200) {
+                return { ok: false, detail: `${file.name}: HTTP ${download.status}` };
+            }
+
+            const checksum = createHash('sha256').update(download.body).digest('hex');
+
+            if (checksum !== file.checksum) {
+                return { ok: false, detail: `${file.name}: checksum mismatch` };
+            }
+
+            writeFileSync(join(paths.snapshots, file.name), download.body);
+        }
+
+        // Written after the snapshots, because the capture record is what makes a bundle look
+        // complete. Landing it first would let a comparison start against a half-populated one.
+        writeFileSync(paths.manifest, `${JSON.stringify(payload.manifest, null, 2)}\n`);
+        writeFileSync(paths.capture, `${JSON.stringify(payload.record, null, 2)}\n`);
+
+        return { ok: true, detail: `${payload.files.length} snapshot(s) restored` };
+    } catch (error) {
+        return { ok: false, detail: error instanceof Error ? error.message : String(error) };
     }
 }
 

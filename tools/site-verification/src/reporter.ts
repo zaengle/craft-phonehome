@@ -2,7 +2,7 @@ import type { FullResult, Reporter, TestCase, TestResult } from '@playwright/tes
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runConfig } from './config';
-import { bundlePaths, findArtifacts, postArtifact, reportRun, type CaptureRecord } from './manifest';
+import { bundlePaths, findArtifacts, postArtifact, pushBaseline, reportRun, type CaptureRecord } from './manifest';
 
 /**
  * Outcomes are reported as four distinct states rather than pass/fail.
@@ -181,6 +181,35 @@ export default class VerificationReporter implements Reporter {
         if (outcome.runId !== null) {
             await this.sendArtifacts(outcome.runId);
         }
+
+        await this.sendBaseline();
+    }
+
+    /**
+     * Sends a completed baseline to the dashboard, so a later comparison need not run here.
+     *
+     * Only after a capture that finished. The capture record is promoted by `settleCaptureRecord`
+     * above and only when every expected check passed, so its presence is the signal that this
+     * bundle is worth being the reference -- a half-captured one must not become the thing every
+     * future comparison is held against.
+     */
+    private async sendBaseline(): Promise<void> {
+        if (this.config.mode !== 'capture' || this.config.dashboardOrigin === null || !existsSync(this.paths.capture)) {
+            return;
+        }
+
+        const pushed = await pushBaseline(
+            this.config.dashboardOrigin,
+            this.config.token,
+            this.config.runId,
+            this.config.bundleDir,
+            this.config.dashboardInsecureTls,
+            this.config.replace,
+        );
+
+        process.stdout.write(
+            pushed.ok ? `  baseline stored on ${this.config.dashboardOrigin} (${pushed.detail})\n` : `  ⚠  could not store the baseline: ${pushed.detail}\n`,
+        );
     }
 
     /**
