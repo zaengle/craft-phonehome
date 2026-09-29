@@ -93,12 +93,12 @@ class Verification extends Component
      * @param array<mixed> $masks
      * @return array<mixed>
      */
-    private function withAutoCoverage(array $explicit, array $defaultAssert, array $masks): array
+    protected function withAutoCoverage(array $explicit, array $defaultAssert, array $masks): array
     {
         try {
             $representatives = $this->representativeUris();
         } catch (Throwable $e) {
-            PhoneHome::error('Error selecting pages for automatic coverage: ' . $e->getMessage());
+            $this->logError('Error selecting pages for automatic coverage: ' . $e->getMessage());
 
             return $explicit;
         }
@@ -120,7 +120,7 @@ class Verification extends Component
                 $this->templatesForUris(Table::CATEGORYGROUPS_SITES, Table::CATEGORIES, 'groupId', $explicitPaths),
             );
         } catch (Throwable $e) {
-            PhoneHome::error('Error resolving explicit page templates: ' . $e->getMessage());
+            $this->logError('Error resolving explicit page templates: ' . $e->getMessage());
         }
 
         $coveredTemplates = array_flip(array_values($covered));
@@ -156,7 +156,15 @@ class Verification extends Component
     /**
      * @param array<string, bool> $used
      */
-    private function templateId(string $template, array $used): string
+    /**
+     * Separated so the failure paths can be exercised without a booted Craft application.
+     */
+    protected function logError(string $message): void
+    {
+        PhoneHome::error($message);
+    }
+
+    protected function templateId(string $template, array $used): string
     {
         $base = preg_replace('/[^a-z0-9]+/', '-', strtolower($template)) ?? 'template';
         $base = trim((string)$base, '-');
@@ -293,7 +301,7 @@ class Verification extends Component
 
             $routableUris = $this->countRoutableUris();
         } catch (Throwable $e) {
-            PhoneHome::error('Error reading template coverage: ' . $e->getMessage());
+            $this->logError('Error reading template coverage: ' . $e->getMessage());
 
             return null;
         }
@@ -343,7 +351,7 @@ class Verification extends Component
      *
      * @return array<string, string> template => uri
      */
-    private function representativeUris(): array
+    protected function representativeUris(): array
     {
         $rows = $this->liveEntriesQuery()
             ->select(['settings.template AS template', 'uri' => new Expression('MIN([[elements_sites.uri]])')])
@@ -376,7 +384,7 @@ class Verification extends Component
      * @param list<string> $uris
      * @return array<string, string>
      */
-    private function templatesForUris(string $settingsTable, string $elementTable, string $foreignKey, array $uris): array
+    protected function templatesForUris(string $settingsTable, string $elementTable, string $foreignKey, array $uris): array
     {
         if ($uris === []) {
             return [];
@@ -439,7 +447,7 @@ class Verification extends Component
      * Converts a manifest path to the URI spelling Craft stores, where the homepage is `__home__`
      * and nothing else carries a leading slash.
      */
-    private function pathToUri(string $path): string
+    protected function pathToUri(string $path): string
     {
         $uri = trim(explode('?', $path)[0], '/');
 
