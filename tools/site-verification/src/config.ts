@@ -41,6 +41,13 @@ export interface RunConfig {
      * the other, and the two are commonly different environments.
      */
     dashboardInsecureTls: boolean;
+    /**
+     * The Phone Home patch this run is verifying, when it is verifying one.
+     *
+     * Null for a run fired after an ordinary deploy or by hand. The dashboard checks the claim
+     * against its own records before trusting it, so this is a hint rather than an assertion.
+     */
+    patchId: number | null;
 }
 
 function required(name: string): string {
@@ -109,6 +116,7 @@ export function runConfig(): RunConfig {
         replace: process.env.PHV_REPLACE === '1',
         dashboardOrigin: process.env.PHV_DASHBOARD_ORIGIN?.replace(/\/+$/, '') || null,
         dashboardInsecureTls: process.env.PHV_DASHBOARD_INSECURE_TLS === '1',
+        patchId: Number.isInteger(Number(process.env.PHV_PATCH_ID)) && process.env.PHV_PATCH_ID ? Number(process.env.PHV_PATCH_ID) : null,
         // Resolved here rather than at each use. Two callers each defaulting to Date.now() disagree
         // by a millisecond and quietly write one run's evidence into two directories.
         attemptId: attemptId(mode),

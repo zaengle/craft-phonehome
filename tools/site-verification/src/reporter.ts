@@ -104,6 +104,10 @@ export default class VerificationReporter implements Reporter {
         const report = {
             run_id: this.config.runId,
             attempt_id: this.attemptId,
+            // What this run was for, when it was for something. The dashboard verifies the claim
+            // against its own records rather than taking it, so a wrong id loses the association
+            // and not the result.
+            patch_id: this.config.patchId,
             mode: this.config.mode,
             origin: this.config.origin,
             full_page: this.config.fullPage,
