@@ -44,8 +44,15 @@ if [ -z "$TOKEN" ]; then
     exit 1
 fi
 
+# Where to report the finished result, if anywhere. Unset means the run stays local, which is the
+# default: a result is useful on its own and must not depend on a dashboard being reachable. Set
+# PHV_DASHBOARD_ORIGIN in the site's .env to send it to Phone Home, and PHV_DASHBOARD_INSECURE_TLS=1
+# when that is a local DDEV project with a self-signed certificate.
+DASHBOARD="$(grep '^PHV_DASHBOARD_ORIGIN=' "${DDEV_APPROOT}/.env" 2>/dev/null | cut -d= -f2- || true)"
+DASHBOARD_INSECURE="$(grep '^PHV_DASHBOARD_INSECURE_TLS=' "${DDEV_APPROOT}/.env" 2>/dev/null | cut -d= -f2- || true)"
+
 run_half() {
-    docker exec -e "PHV_TOKEN=${TOKEN}" -e "PHV_RUN_ID=${RUN_ID}" "$CONTAINER" npm run --silent "$1"
+    docker exec -e "PHV_TOKEN=${TOKEN}" -e "PHV_RUN_ID=${RUN_ID}" -e "PHV_DASHBOARD_ORIGIN=${DASHBOARD}" -e "PHV_DASHBOARD_INSECURE_TLS=${DASHBOARD_INSECURE}" "$CONTAINER" npm run --silent "$1"
 }
 
 # Encodes one value as a JSON string, rather than wrapping it in quotes and hoping.

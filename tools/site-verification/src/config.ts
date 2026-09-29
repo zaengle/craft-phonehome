@@ -29,6 +29,18 @@ export interface RunConfig {
     maxFullPageHeight: number;
     /** How many times capture renders each page to establish it is reproducible. 1 disables. */
     stabilitySamples: number;
+    /**
+     * Phone Home's origin, if the finished result should be reported to it. Unset means the result
+     * stays local, which is the default: a run is useful on its own and must not depend on a
+     * dashboard being reachable.
+     */
+    dashboardOrigin: string | null;
+    /**
+     * Accept a self-signed certificate when reporting. Separate from `insecureTls`, which is about
+     * the site being rendered: relaxing certificate checking for one must not silently relax it for
+     * the other, and the two are commonly different environments.
+     */
+    dashboardInsecureTls: boolean;
 }
 
 function required(name: string): string {
@@ -95,6 +107,8 @@ export function runConfig(): RunConfig {
         // a spurious change weeks later when nobody is expecting it.
         stabilitySamples: Math.max(1, Number(process.env.PHV_STABILITY_SAMPLES ?? 5)),
         replace: process.env.PHV_REPLACE === '1',
+        dashboardOrigin: process.env.PHV_DASHBOARD_ORIGIN?.replace(/\/+$/, '') || null,
+        dashboardInsecureTls: process.env.PHV_DASHBOARD_INSECURE_TLS === '1',
         // Resolved here rather than at each use. Two callers each defaulting to Date.now() disagree
         // by a millisecond and quietly write one run's evidence into two directories.
         attemptId: attemptId(mode),

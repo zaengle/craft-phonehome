@@ -2,7 +2,7 @@ import type { FullResult, Reporter, TestCase, TestResult } from '@playwright/tes
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runConfig } from './config';
-import { bundlePaths, type CaptureRecord } from './manifest';
+import { bundlePaths, reportRun, type CaptureRecord } from './manifest';
 
 /**
  * Outcomes are reported as four distinct states rather than pass/fail.
@@ -135,6 +135,30 @@ export default class VerificationReporter implements Reporter {
         if (missing.length > 0) {
             process.stdout.write(`  ${missing.length} expected check(s) never ran: ${missing.join(', ')}\n`);
         }
+
+        await this.report(report);
+    }
+
+    /**
+     * Sends the finished result to Phone Home, if this run was told where that is.
+     *
+     * Deliberately the last thing that happens, and deliberately unable to fail the run. The result
+     * is already on disk; a dashboard that is down, misconfigured or simply not part of this setup
+     * must not turn a real verdict into a failed run. What it does instead is say so on stdout,
+     * because a result silently not arriving is the failure mode worth avoiding here.
+     */
+    private async report(report: unknown): Promise<void> {
+        if (this.config.dashboardOrigin === null) {
+            return;
+        }
+
+        const outcome = await reportRun(this.config.dashboardOrigin, this.config.token, report, this.config.dashboardInsecureTls);
+
+        process.stdout.write(
+            outcome.ok
+                ? `  reported to ${this.config.dashboardOrigin} (${outcome.detail})\n`
+                : `  ⚠  could not report to ${this.config.dashboardOrigin}: ${outcome.detail}\n`,
+        );
     }
 
     /**

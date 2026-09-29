@@ -63,7 +63,7 @@ export function bundlePaths(bundleDir: string) {
  * pointing the runner at a local DDEV origin cannot quietly relax certificate checking for anything
  * else the run does.
  */
-function postJson(url: string, token: string, insecureTls: boolean): Promise<{ status: number; body: string }> {
+function postJson(url: string, token: string, insecureTls: boolean, body = '{}'): Promise<{ status: number; body: string }> {
     const target = new URL(url);
     const send = target.protocol === 'https:' ? httpsRequest : httpRequest;
 
@@ -78,7 +78,7 @@ function postJson(url: string, token: string, insecureTls: boolean): Promise<{ s
                     'X-Auth-Token': token,
                     Accept: 'application/json',
                     'Content-Type': 'application/json',
-                    'Content-Length': 2,
+                    'Content-Length': Buffer.byteLength(body),
                 },
             },
             (res) => {
@@ -91,8 +91,43 @@ function postJson(url: string, token: string, insecureTls: boolean): Promise<{ s
 
         req.on('timeout', () => req.destroy(new Error('timed out after 15s')));
         req.on('error', reject);
-        req.end('{}');
+        req.end(body);
     });
+}
+
+/**
+ * Reports a finished result to Phone Home.
+ *
+ * Authenticated with the site's own Phone Home token -- the same one the runner already holds in
+ * order to read the manifest -- so reporting introduces no second credential.
+ *
+ * Never throws. A run is evidence about the site, and it is already written to the bundle by the
+ * time this is called; an unreachable dashboard must not turn a real result into a failed run.
+ * The outcome is returned so the caller can say what happened rather than stay silent.
+ */
+export async function reportRun(
+    dashboardOrigin: string,
+    token: string,
+    report: unknown,
+    insecureTls: boolean,
+): Promise<{ ok: boolean; detail: string }> {
+    try {
+        const response = await postJson(`${dashboardOrigin}/api/verification-runs`, token, insecureTls, JSON.stringify(report));
+
+        if (response.status === 201) {
+            return { ok: true, detail: 'recorded' };
+        }
+
+        // The endpoint records an attempt once and acknowledges a repeat, so a retry after a
+        // timeout is a success, not a duplicate.
+        if (response.status === 200) {
+            return { ok: true, detail: 'already recorded' };
+        }
+
+        return { ok: false, detail: `HTTP ${response.status} ${response.body.slice(0, 200)}` };
+    } catch (error) {
+        return { ok: false, detail: error instanceof Error ? error.message : String(error) };
+    }
 }
 
 /**
