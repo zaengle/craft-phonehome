@@ -2,7 +2,7 @@ import type { FullResult, Reporter, TestCase, TestResult } from '@playwright/tes
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runConfig } from './config';
-import { bundlePaths, reportRun, type CaptureRecord } from './manifest';
+import { bundlePaths, findArtifacts, postArtifact, reportRun, type CaptureRecord } from './manifest';
 
 /**
  * Outcomes are reported as four distinct states rather than pass/fail.
@@ -159,6 +159,63 @@ export default class VerificationReporter implements Reporter {
                 ? `  reported to ${this.config.dashboardOrigin} (${outcome.detail})\n`
                 : `  ⚠  could not report to ${this.config.dashboardOrigin}: ${outcome.detail}\n`,
         );
+
+        if (outcome.runId !== null) {
+            await this.sendArtifacts(outcome.runId);
+        }
+    }
+
+    /**
+     * Sends the screenshots behind a changed or failed check.
+     *
+     * Comparisons only. A capture writes an `-actual.png` for every page as it establishes each
+     * baseline, and those are not a change -- sending them would double the stored bytes on every
+     * capture and file the baseline itself under "what changed". Within a comparison Playwright
+     * writes these only where a screenshot check failed, so a run where nothing moved sends
+     * nothing.
+     *
+     * Like the result itself this cannot fail the run: the images are already on disk next to the
+     * result, and the report they belong to has already arrived.
+     */
+    private async sendArtifacts(runId: number): Promise<void> {
+        if (this.config.mode !== 'compare') {
+            return;
+        }
+
+        const artifacts = findArtifacts(join(this.paths.attempts, this.attemptId, 'artifacts'));
+
+        if (artifacts.length === 0) {
+            return;
+        }
+
+        let sent = 0;
+        const failures: string[] = [];
+
+        for (const artifact of artifacts) {
+            try {
+                const response = await postArtifact(
+                    this.config.dashboardOrigin as string,
+                    runId,
+                    this.config.token,
+                    artifact,
+                    this.config.dashboardInsecureTls,
+                );
+
+                if (response.status === 200 || response.status === 201) {
+                    sent++;
+                } else {
+                    failures.push(`${artifact.page}/${artifact.variant}: HTTP ${response.status}`);
+                }
+            } catch (error) {
+                failures.push(`${artifact.page}/${artifact.variant}: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }
+
+        process.stdout.write(`  sent ${sent} of ${artifacts.length} screenshot(s)\n`);
+
+        if (failures.length > 0) {
+            process.stdout.write(`  ⚠  ${failures.slice(0, 3).join('; ')}\n`);
+        }
     }
 
     /**

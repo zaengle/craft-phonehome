@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
@@ -110,24 +110,132 @@ export async function reportRun(
     token: string,
     report: unknown,
     insecureTls: boolean,
-): Promise<{ ok: boolean; detail: string }> {
+): Promise<{ ok: boolean; detail: string; runId: number | null }> {
     try {
         const response = await postJson(`${dashboardOrigin}/api/verification-runs`, token, insecureTls, JSON.stringify(report));
+        const runId = parseRunId(response.body);
 
         if (response.status === 201) {
-            return { ok: true, detail: 'recorded' };
+            return { ok: true, detail: 'recorded', runId };
         }
 
         // The endpoint records an attempt once and acknowledges a repeat, so a retry after a
-        // timeout is a success, not a duplicate.
+        // timeout is a success, not a duplicate. No id is returned for upload, because the images
+        // for that run were posted the first time.
         if (response.status === 200) {
-            return { ok: true, detail: 'already recorded' };
+            return { ok: true, detail: 'already recorded', runId: null };
         }
 
-        return { ok: false, detail: `HTTP ${response.status} ${response.body.slice(0, 200)}` };
+        return { ok: false, detail: `HTTP ${response.status} ${response.body.slice(0, 200)}`, runId: null };
     } catch (error) {
-        return { ok: false, detail: error instanceof Error ? error.message : String(error) };
+        return { ok: false, detail: error instanceof Error ? error.message : String(error), runId: null };
     }
+}
+
+function parseRunId(body: string): number | null {
+    try {
+        const parsed = JSON.parse(body) as { id?: unknown };
+
+        return typeof parsed.id === 'number' ? parsed.id : null;
+    } catch {
+        return null;
+    }
+}
+
+/** One screenshot to send: which page it is of, which of the three, and where it is on disk. */
+export interface Artifact {
+    page: string;
+    variant: 'expected' | 'actual' | 'diff';
+    file: string;
+}
+
+const VARIANTS = ['expected', 'actual', 'diff'] as const;
+
+/**
+ * Finds the screenshots Playwright wrote for this attempt.
+ *
+ * Playwright only writes these when a screenshot check fails, which is exactly when somebody wants
+ * to look at them -- a run where nothing moved has nothing to show and sends nothing. The page name
+ * is recovered by stripping the variant suffix rather than by splitting on a hyphen, because
+ * generated page ids contain hyphens of their own.
+ */
+export function findArtifacts(outputDir: string): Artifact[] {
+    if (!existsSync(outputDir)) {
+        return [];
+    }
+
+    const found: Artifact[] = [];
+
+    const walk = (dir: string) => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+            const full = join(dir, entry.name);
+
+            if (entry.isDirectory()) {
+                walk(full);
+                continue;
+            }
+
+            for (const variant of VARIANTS) {
+                const suffix = `-${variant}.png`;
+
+                if (entry.name.endsWith(suffix)) {
+                    found.push({ page: entry.name.slice(0, -suffix.length), variant, file: full });
+                    break;
+                }
+            }
+        }
+    };
+
+    walk(outputDir);
+
+    return found;
+}
+
+/**
+ * Posts one screenshot as a raw PNG body, with its metadata in headers.
+ *
+ * Raw rather than multipart because the runner has no dependencies, and hand-rolling a multipart
+ * encoder to send a single file is more moving parts than the job needs.
+ */
+export function postArtifact(
+    dashboardOrigin: string,
+    runId: number,
+    token: string,
+    artifact: Artifact,
+    insecureTls: boolean,
+): Promise<{ status: number; body: string }> {
+    const target = new URL(`${dashboardOrigin}/api/verification-runs/${runId}/artifacts`);
+    const send = target.protocol === 'https:' ? httpsRequest : httpRequest;
+    const body = readFileSync(artifact.file);
+
+    return new Promise((resolve, reject) => {
+        const req = send(
+            target,
+            {
+                method: 'POST',
+                timeout: 30_000,
+                rejectUnauthorized: !insecureTls,
+                headers: {
+                    'X-Auth-Token': token,
+                    'X-Artifact-Page': artifact.page,
+                    'X-Artifact-Variant': artifact.variant,
+                    Accept: 'application/json',
+                    'Content-Type': 'image/png',
+                    'Content-Length': body.byteLength,
+                },
+            },
+            (res) => {
+                let text = '';
+                res.setEncoding('utf8');
+                res.on('data', (chunk: string) => (text += chunk));
+                res.on('end', () => resolve({ status: res.statusCode ?? 0, body: text }));
+            },
+        );
+
+        req.on('timeout', () => req.destroy(new Error('timed out after 30s')));
+        req.on('error', reject);
+        req.end(body);
+    });
 }
 
 /**
