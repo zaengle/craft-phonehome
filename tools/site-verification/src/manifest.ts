@@ -49,6 +49,7 @@ export function bundlePaths(bundleDir: string) {
         result: join(bundleDir, 'result.json'),
         drift: join(bundleDir, 'drift.json'),
         change: join(bundleDir, 'change.json'),
+        environment: join(bundleDir, 'environment.json'),
         capture: join(bundleDir, 'capture.json'),
         pendingCapture: join(bundleDir, 'capture.pending.json'),
         attempts: join(bundleDir, 'attempts'),
@@ -565,6 +566,12 @@ export interface CaptureRecord {
         build_id: string | null;
         craft_version: string | null;
         environment: string | null;
+        /**
+         * Craft and every plugin, by version, as the site reported them at capture. Absent on
+         * bundles frozen before this was recorded, which a comparison treats as "unknown" rather
+         * than "unchanged".
+         */
+        packages?: Record<string, string>;
     };
     settings: {
         full_page: boolean;
@@ -591,7 +598,62 @@ export function readIdentity(payload: Record<string, unknown>): CaptureRecord['s
         build_id: text('build_id'),
         craft_version: text('craft_version'),
         environment: text('environment'),
+        packages: readPackages(payload),
     };
+}
+
+/**
+ * Craft and every plugin the site reports, by version.
+ *
+ * Craft core is keyed by its Composer name because that is how a remediation names it; plugins are
+ * keyed by handle, which is all the plugin API carries for them.
+ */
+export function readPackages(payload: Record<string, unknown>): Record<string, string> {
+    const packages: Record<string, string> = {};
+
+    if (typeof payload.craft_version === 'string') {
+        packages['craftcms/cms'] = payload.craft_version;
+    }
+
+    const plugins = payload.plugins;
+
+    if (plugins !== null && typeof plugins === 'object' && !Array.isArray(plugins)) {
+        for (const [handle, info] of Object.entries(plugins as Record<string, unknown>)) {
+            const version = (info as { version?: unknown } | null)?.version;
+
+            if (typeof version === 'string') {
+                packages[handle] = version;
+            }
+        }
+    }
+
+    return packages;
+}
+
+/**
+ * How the site's installed versions moved between the baseline and now.
+ *
+ * A comparison only proves something about a change if the change reached the environment being
+ * compared. The lock file moving on a branch says nothing about that; the versions the site itself
+ * reports do. `known` is false when the baseline predates this record, and a caller must treat that
+ * as "cannot say" rather than "nothing moved".
+ */
+export interface EnvironmentDelta {
+    known: boolean;
+    changed: { name: string; before: string | null; after: string | null }[];
+}
+
+export function describeEnvironmentDelta(before: Record<string, string> | undefined, after: Record<string, string>): EnvironmentDelta {
+    if (before === undefined) {
+        return { known: false, changed: [] };
+    }
+
+    const names = [...new Set([...Object.keys(before), ...Object.keys(after)])].sort();
+    const changed = names
+        .filter((name) => before[name] !== after[name])
+        .map((name) => ({ name, before: before[name] ?? null, after: after[name] ?? null }));
+
+    return { known: true, changed };
 }
 
 export function isAbort<T extends object>(value: T | Abort): value is Abort {

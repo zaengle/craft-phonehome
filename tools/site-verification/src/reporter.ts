@@ -2,7 +2,7 @@ import type { FullResult, Reporter, TestCase, TestResult } from '@playwright/tes
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runConfig } from './config';
-import { bundlePaths, findArtifacts, postArtifact, pushBaseline, reportRun, type CaptureRecord } from './manifest';
+import { bundlePaths, findArtifacts, postArtifact, pushBaseline, reportRun, type CaptureRecord, type EnvironmentDelta } from './manifest';
 
 /**
  * Outcomes are reported as four distinct states rather than pass/fail.
@@ -81,10 +81,13 @@ export default class VerificationReporter implements Reporter {
         const ran = this.checks.map((check) => `${check.kind}:${check.id}`);
         const missing = expected.filter((id) => !ran.includes(id));
 
-        const worst = PRECEDENCE.find((candidate) => this.checks.some((check) => check.outcome === candidate)) ?? 'inconclusive';
-
         const change = this.readJson<unknown>(this.paths.change, sidecarErrors, 'change');
         const drift = this.readJson<string[]>(this.paths.drift, sidecarErrors, 'manifest_drift') ?? [];
+        const environment = this.readJson<EnvironmentDelta>(this.paths.environment, sidecarErrors, 'environment_delta');
+
+        this.gateOnEnvironment(environment);
+
+        const worst = PRECEDENCE.find((candidate) => this.checks.some((check) => check.outcome === candidate)) ?? 'inconclusive';
 
         // A report that summarises only the checks that happened to run will call a filtered or
         // partially-collected run a pass, having never executed the assertion that would have
@@ -131,6 +134,10 @@ export default class VerificationReporter implements Reporter {
             // What the run was verified across, when the loop applied it. A comparison whose
             // change never landed is a pass about nothing, so it is recorded next to the verdict.
             change,
+            // What the site itself reports moved since the baseline: Craft and every plugin, by
+            // version. This is the evidence that the change reached the environment; the lock
+            // file above only says it reached a branch.
+            environment_delta: environment,
             // Recorded, not acted on: the run used the frozen definitions either way, and an
             // operator reading a clean result needs to know the site has since been redefined.
             manifest_drift: drift,
@@ -155,6 +162,36 @@ export default class VerificationReporter implements Reporter {
         }
 
         await this.report(report);
+    }
+
+    /**
+     * Refuses to let a comparison that expected a change pass when the site reports none.
+     *
+     * The remediation loop deploys a branch and then compares. If the deploy did not actually
+     * change what the site runs -- a hook that answered before finishing, a cache, the wrong
+     * environment -- every page compares clean, and that clean result would be carried into a pull
+     * request as proof of a change that was never rendered. Recorded as a gate check so the reason
+     * is visible alongside the page results rather than folded into a bare outcome.
+     *
+     * An observation elsewhere still wins: a page that changed is evidence whatever the versions
+     * say, and the delta beside it explains that the change came from somewhere else.
+     */
+    private gateOnEnvironment(environment: EnvironmentDelta | null): void {
+        if (this.config.mode !== 'compare' || !this.config.expectChange || this.checks.some((check) => check.kind === 'gate')) {
+            return;
+        }
+
+        let diagnostic: string | null = null;
+
+        if (environment === null || !environment.known) {
+            diagnostic = `${INCONCLUSIVE} not_deployed — the baseline records no package versions, so whether the change reached ${this.config.origin} cannot be established.`;
+        } else if (environment.changed.length === 0) {
+            diagnostic = `${INCONCLUSIVE} not_deployed — ${this.config.origin} reports the same Craft and plugin versions as at baseline, so the change never reached it. The comparison measured the environment as it already was.`;
+        }
+
+        if (diagnostic !== null) {
+            this.checks.push({ id: 'environment', kind: 'gate', outcome: 'inconclusive', durationMs: 0, diagnostic });
+        }
     }
 
     /**

@@ -7,6 +7,11 @@
 # The result is a DRAFT pull request carrying its own verification. Nothing here merges anything,
 # and a failed verification still opens the pull request: the evidence is the point, and a failure
 # nobody can see is worse than one attached to a draft.
+#
+# The verification is a pair. `baseline` freezes the environment as it stands, `deploy` puts the
+# branch on it, and `verify` compares against the frozen copy. Both halves name the same run id,
+# which is what lets the second half find the first: the baseline lives in Phone Home, not on the
+# runner, and a comparison that asks for a run id nobody captured under is inconclusive, not a pass.
 name: Prepare security remediation
 
 on:
@@ -27,10 +32,30 @@ on:
         required: true
         type: string
       dashboard_origin: { required: true, type: string }
+      deploy_workflow:
+        description: >-
+          A workflow_dispatch workflow in this repository that deploys the ref it is run on to
+          verify_origin, and exits non-zero if it did not. Named by the site rather than guessed
+          at here, because deploying is site-specific. Empty means no deploy, which the pull
+          request states plainly.
+        required: false
+        type: string
+        default: ''
       php_version: { required: false, type: string, default: '8.3' }
-      runner_ref: { required: false, type: string, default: 'main' }
+      runner_ref:
+        description: >-
+          Which commit of the runner to use. Empty means the commit this workflow file was read
+          from, so pinning `remediate.yml@<tag>` in the calling repository pins the runner with it
+          and the two cannot drift apart. Set it only to run a different runner deliberately.
+        required: false
+        type: string
+        default: ''
     secrets:
-      phonehome_token: { required: true }
+      phonehome_token:
+        description: >-
+          The site's Phone Home token. Optional: with `id-token: write` granted, the run proves its
+          identity to Phone Home and is handed the linked site's token instead.
+        required: false
       composer_auth:
         description: 'COMPOSER_AUTH json, if this site resolves commercial Craft plugins.'
         required: false
@@ -40,21 +65,26 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # To start the site's own deploy workflow and watch it finish. A workflow_dispatch started with
+  # the job's token does create a run, unlike most events that token triggers.
+  actions: write
+  # To prove this run's identity to Phone Home in place of a stored secret.
+  id-token: write
 
 jobs:
-  prepare:
+  # A branch that already exists is a dispatch that already happened. Re-running must not
+  # force-push over a pull request somebody is reading, and two patches in flight for one site must
+  # not collide. Checked first and on its own, so that neither the baseline capture nor the Composer
+  # resolution starts for a dispatch that is going to be declined.
+  check:
     runs-on: ubuntu-latest
     outputs:
       existing: ${{ steps.branch.outputs.existing }}
-      moved: ${{ steps.resolve.outputs.moved }}
-      count: ${{ steps.resolve.outputs.count }}
+      run_id: ${{ steps.run.outputs.run_id }}
 
     steps:
       - uses: actions/checkout@v4
 
-      # A branch that already exists is a dispatch that already happened. Re-running must not
-      # force-push over a pull request somebody is reading, and two patches in flight for one site
-      # must not collide.
       - name: Check whether this branch already exists
         id: branch
         run: |
@@ -65,14 +95,53 @@ jobs:
             echo "existing=0" >> "$GITHUB_OUTPUT"
           fi
 
+      # The one run id both halves of the verification share, minted once. `github.run_id` makes
+      # it new for every dispatch, so a re-run can never be compared against a reference an earlier
+      # run captured. Read from here rather than spelled twice, so the two halves cannot drift.
+      - name: Name the verification bundle
+        id: run
+        run: echo "run_id=remediation-${{ inputs.patch_id }}-${{ github.run_id }}" >> "$GITHUB_OUTPUT"
+
+  # Freezes the verification environment before anything touches it, under the run id `check`
+  # minted, which `verify` reads from the same place.
+  #
+  # The wrapper workflow below is read from `main` because a `uses:` ref cannot be an expression.
+  # The runner it checks out is pinned to this file's own commit (`github.job_workflow_sha`), so
+  # the code that renders and compares is exactly the code released alongside this workflow; only
+  # the thin wrapper floats, and its inputs are kept backward compatible for that reason.
+  baseline:
+    needs: check
+    if: needs.check.outputs.existing == '0'
+    uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@main
+    with:
+      mode: capture
+      run_id: ${{ needs.check.outputs.run_id }}
+      origin: ${{ inputs.verify_origin }}
+      dashboard_origin: ${{ inputs.dashboard_origin }}
+      patch_id: ${{ inputs.patch_id }}
+      runner_ref: ${{ inputs.runner_ref || github.job_workflow_sha }}
+    secrets:
+      phonehome_token: ${{ secrets.phonehome_token }}
+      basic_auth_user: ${{ secrets.basic_auth_user }}
+      basic_auth_password: ${{ secrets.basic_auth_password }}
+
+  prepare:
+    needs: check
+    if: needs.check.outputs.existing == '0'
+    runs-on: ubuntu-latest
+    outputs:
+      moved: ${{ steps.resolve.outputs.moved }}
+      count: ${{ steps.resolve.outputs.count }}
+
+    steps:
+      - uses: actions/checkout@v4
+
       - uses: shivammathur/setup-php@v2
-        if: steps.branch.outputs.existing == '0'
         with:
           php-version: ${{ inputs.php_version }}
 
       - name: Resolve the change
         id: resolve
-        if: steps.branch.outputs.existing == '0'
         env:
           COMPOSER_AUTH: ${{ secrets.composer_auth }}
         run: |
@@ -104,7 +173,6 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Push the branch
-        if: steps.branch.outputs.existing == '0'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -112,71 +180,158 @@ jobs:
           git commit -m "Security: ${{ inputs.package }} to ${{ inputs.version }} (patch #${{ inputs.patch_id }})"
           git push --set-upstream origin "${{ inputs.branch }}"
 
-      # Deploying the branch is site-specific and deliberately not guessed at here. Without it the
-      # verification measures the environment as it already was, which the pull request says
-      # plainly rather than implying the change was proven.
-      - name: Deploy the branch to the verification environment
-        if: steps.branch.outputs.existing == '0'
-        run: echo "::warning::No deploy step is wired in, so the verification did not render this branch."
+  # Waits for the baseline as well as the branch: the environment must be frozen before the branch
+  # lands on it, or the comparison is held against a reference that already contains the change.
+  #
+  # Deploying is site-specific, so it is not done here. The site names a workflow_dispatch workflow
+  # of its own that deploys the ref it is run on and fails if it did not; this job starts that
+  # workflow on the branch and waits for it. `deployed=1` is published only when that run
+  # succeeded, so the pull request can say whether the comparison rendered this change at all.
+  deploy:
+    needs: [prepare, baseline]
+    runs-on: ubuntu-latest
+    outputs:
+      deployed: ${{ steps.deploy.outputs.deployed }}
+      run_url: ${{ steps.deploy.outputs.run_url }}
 
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy the branch to the verification environment
+        id: deploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_WORKFLOW: ${{ inputs.deploy_workflow }}
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          if [ -z "$DEPLOY_WORKFLOW" ]; then
+            echo "::warning::No deploy workflow was named, so the verification did not render this branch."
+            echo "deployed=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # The run id is not returned by the dispatch, so the run is found by looking for one on
+          # this branch created after the dispatch. Timestamps are ISO-8601, which compare as text.
+          started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          gh workflow run "$DEPLOY_WORKFLOW" --ref "$BRANCH"
+
+          run_id=""
+          for _ in $(seq 1 30); do
+            run_id="$(gh run list --workflow "$DEPLOY_WORKFLOW" --branch "$BRANCH" --event workflow_dispatch \
+              --limit 10 --json databaseId,createdAt \
+              --jq --arg started "$started" '[.[] | select(.createdAt >= $started)] | .[0].databaseId // empty')"
+            [ -n "$run_id" ] && break
+            sleep 2
+          done
+
+          if [ -z "$run_id" ]; then
+            echo "::error::${DEPLOY_WORKFLOW} was dispatched on ${BRANCH} but no run appeared within a minute."
+            echo "deployed=0" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          url="$(gh run view "$run_id" --json url --jq .url)"
+          echo "run_url=$url" >> "$GITHUB_OUTPUT"
+          echo "Waiting on $url"
+
+          # --exit-status makes this step fail when the deploy did, which is what gates `verify`.
+          if gh run watch "$run_id" --exit-status; then
+            echo "deployed=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::The deploy run failed: $url"
+            echo "deployed=0" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+  # Only worth running against a baseline that was actually captured. A capture that did not pass
+  # sealed nothing, and comparing against nothing is inconclusive by construction — better to say so
+  # in the pull request than to spend a job establishing it.
   verify:
-    needs: prepare
-    if: needs.prepare.outputs.existing == '0'
-    # A failed verification must still reach a pull request. That is the result worth seeing.
-    continue-on-error: true
+    needs: [check, baseline, prepare, deploy]
+    if: always() && needs.check.outputs.existing == '0' && needs.baseline.outputs.overall == 'passed' && needs.deploy.result == 'success'
     uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@main
     with:
       mode: compare
-      run_id: remediation-${{ inputs.patch_id }}-${{ github.run_id }}
+      run_id: ${{ needs.check.outputs.run_id }}
       origin: ${{ inputs.verify_origin }}
       dashboard_origin: ${{ inputs.dashboard_origin }}
       patch_id: ${{ inputs.patch_id }}
-      runner_ref: ${{ inputs.runner_ref }}
+      runner_ref: ${{ inputs.runner_ref || github.job_workflow_sha }}
+      # The deploy above succeeded, so the site must now report different versions than it did at
+      # baseline. If it does not, the comparison is of the old code and says so.
+      expect_change: true
     secrets:
       phonehome_token: ${{ secrets.phonehome_token }}
       basic_auth_user: ${{ secrets.basic_auth_user }}
       basic_auth_password: ${{ secrets.basic_auth_password }}
 
+  # A pushed branch always gets its pull request, whatever the verification concluded. That is the
+  # result worth seeing, and a failure nobody can find is worse than one attached to a draft.
   pull_request:
-    needs: [prepare, verify]
-    if: always() && needs.prepare.outputs.existing == '0'
+    needs: [check, prepare, baseline, deploy, verify]
+    if: always() && needs.check.outputs.existing == '0' && needs.prepare.result == 'success'
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
+      # The body is composed by a script in the runner (ci/pr-body.sh) with its own tests, so the
+      # sentences a reviewer reads were exercised before any job ran them.
+      - name: Check out the runner
+        uses: actions/checkout@v4
+        with:
+          repository: zaengle/craft-phonehome
+          ref: ${{ inputs.runner_ref || github.job_workflow_sha }}
+          path: runner
+
+      - name: Obtain the site token
+        env:
+          PHV_TOKEN: ${{ secrets.phonehome_token }}
+          PHV_DASHBOARD_ORIGIN: ${{ inputs.dashboard_origin }}
+          PHV_ORIGIN: ${{ inputs.verify_origin }}
+        run: |
+          token="$(bash runner/tools/site-verification/ci/site-token.sh)"
+          echo "::add-mask::${token}"
+          echo "PHONEHOME_TOKEN=${token}" >> "$GITHUB_ENV"
+
+      # The judgement behind this change, read from Phone Home with the site token the run already
+      # holds. A dashboard that cannot be reached is said so in the body rather than left as a
+      # silent omission, so the fetch is allowed to fail here and the script handles the gap.
+      - name: Read the assessment behind the patch
+        id: context
+        run: |
+          context="$(curl -sS --fail-with-body "${{ inputs.dashboard_origin }}/api/patches/${{ inputs.patch_id }}/remediation-context" \
+            -H "X-Auth-Token: ${PHONEHOME_TOKEN}" -H 'Accept: application/json' 2>/dev/null || true)"
+          {
+            echo 'json<<CONTEXT'
+            printf '%s\n' "$context"
+            echo 'CONTEXT'
+          } >> "$GITHUB_OUTPUT"
+
+      # The verdict is read from what the runner reported, never from a job's status. A job's status
+      # only says whether its step exited zero, and a comparison that found a regression exits
+      # non-zero on purpose — reporting that as "failure" would be true and useless, and reporting a
+      # tolerated failure as "success" would be worse.
       - name: Open a draft pull request
         id: pr
         env:
           GH_TOKEN: ${{ github.token }}
+          PATCH_ID: ${{ inputs.patch_id }}
+          ORIGIN: ${{ inputs.verify_origin }}
+          CONTEXT: ${{ steps.context.outputs.json }}
           MOVED: ${{ needs.prepare.outputs.moved }}
           COUNT: ${{ needs.prepare.outputs.count }}
-          VERIFICATION: ${{ needs.verify.result }}
+          BASELINE: ${{ needs.baseline.outputs.overall }}
+          BASELINE_SUMMARY: ${{ needs.baseline.outputs.summary }}
+          DEPLOYED: ${{ needs.deploy.outputs.deployed }}
+          DEPLOY_JOB: ${{ needs.deploy.result }}
+          DEPLOY_RUN_URL: ${{ needs.deploy.outputs.run_url }}
+          VERIFY_JOB: ${{ needs.verify.result }}
+          VERIFICATION: ${{ needs.verify.outputs.overall }}
+          VERIFICATION_SUMMARY: ${{ needs.verify.outputs.summary }}
+          ENVIRONMENT: ${{ needs.verify.outputs.environment }}
         run: |
-          # A security patch that moves three packages and one that moves fifty are different things
-          # to review, and the second should not arrive looking like the first.
-          scale=""
-          if [ "${COUNT:-0}" -gt 10 ]; then
-            scale="> [!WARNING]
-          > This moves ${COUNT} packages. That is a dependency bump which happens to contain a security fix, not a security patch — review it as one."
-          fi
-
-          {
-            echo "Prepared by Phone Home for patch #${{ inputs.patch_id }}."
-            echo
-            [ -n "$scale" ] && echo "$scale" && echo
-            echo "**What moved**"
-            echo
-            echo '```'
-            echo "$MOVED"
-            echo '```'
-            echo
-            echo "**Verification** — \`${VERIFICATION}\` against ${{ inputs.verify_origin }}."
-            echo "The full result, including before and after screenshots of anything that changed,"
-            echo "is on the patch in Phone Home."
-            echo
-            echo "Opened as a draft on purpose. Nobody has merged anything."
-          } > /tmp/pr-body.md
+          bash runner/tools/site-verification/ci/pr-body.sh > /tmp/pr-body.md
 
           url="$(gh pr create --draft --base "${{ github.ref_name }}" --head "${{ inputs.branch }}" \
             --title "Security: ${{ inputs.package }} to ${{ inputs.version }}" --body-file /tmp/pr-body.md)"
@@ -187,7 +342,7 @@ jobs:
         if: steps.pr.outputs.url != ''
         run: |
           curl -sS --fail-with-body -X POST "${{ inputs.dashboard_origin }}/api/patches/${{ inputs.patch_id }}/remediation" \
-            -H "X-Auth-Token: ${{ secrets.phonehome_token }}" \
+            -H "X-Auth-Token: ${PHONEHOME_TOKEN}" \
             -H 'Content-Type: application/json' \
             -H 'Accept: application/json' \
             -d "{\"pull_request_url\":\"${{ steps.pr.outputs.url }}\"}"

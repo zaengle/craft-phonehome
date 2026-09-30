@@ -5,12 +5,14 @@ import {
     bundleObjections,
     bundlePaths,
     describeDrift,
+    describeEnvironmentDelta,
     expectedChecks,
     fetchReport,
     isAbort,
     readCaptureRecord,
     readFrozenManifest,
     readIdentity,
+    readPackages,
     renderEnvironment,
     RUNNER_CONTRACT,
     writeBundle,
@@ -112,6 +114,7 @@ async function prepareCapture(): Promise<void> {
     rmSync(paths.capture, { force: true });
     rmSync(paths.manifest, { force: true });
     rmSync(paths.drift, { force: true });
+    rmSync(paths.environment, { force: true });
 
     const report = await fetchReport(config.apiOrigin, config.token, config.insecureTls);
 
@@ -190,6 +193,18 @@ async function prepareCompare(): Promise<void> {
     if (drift.length > 0) {
         process.stdout.write(`Manifest drift since capture:\n  ${drift.join('\n  ')}\n`);
     }
+
+    // What the site itself says moved since the baseline. Recorded on every comparison; acted on
+    // by the reporter only when this run was told a change should have landed.
+    const environment = describeEnvironmentDelta(record.site.packages, readPackages(current.payload));
+
+    writeFileSync(paths.environment, `${JSON.stringify(environment, null, 2)}\n`);
+
+    if (environment.known && environment.changed.length > 0) {
+        process.stdout.write(
+            `Environment since capture:\n  ${environment.changed.map((entry) => `${entry.name} ${entry.before ?? 'absent'} → ${entry.after ?? 'removed'}`).join('\n  ')}\n`,
+        );
+    }
 }
 
 function abort(reason: string, detail: string[]): void {
@@ -198,6 +213,9 @@ function abort(reason: string, detail: string[]): void {
 
 export default defineConfig({
     testDir: './tests',
+    // The runner's own unit tests live under tests/unit and run through playwright.unit.config.ts.
+    // Collected here they would be counted as checks against the site.
+    testIgnore: '**/unit/**',
     // A visual check that is retried until it passes is not evidence, so a run gets one attempt.
     retries: 0,
     fullyParallel: false,

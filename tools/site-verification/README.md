@@ -69,7 +69,7 @@ told which baseline it is comparing against. Generating one would compare a run 
 | Variable | Purpose |
 |---|---|
 | `PHV_ORIGIN` | Origin the manifest's relative paths resolve against |
-| `PHV_TOKEN` | The site's plugin API token |
+| `PHV_TOKEN` | The site's plugin API token. In CI a job can obtain it from Phone Home instead; see below |
 | `PHV_RUN_ID` | Identifies the frozen bundle |
 | `PHV_API_ORIGIN` | Plugin API origin, when it differs from the site origin |
 | `PHV_INSECURE_TLS` | Accepts a self-signed certificate, for one request, for local work only |
@@ -82,6 +82,25 @@ a capture pushes its bundle; a comparison with nothing local pulls it back befor
 
 `.github/workflows/site-verification.yml` in this repository is a reusable workflow. A site calls it
 around its existing deploy; see `examples/verify-on-deploy.yml` for the whole file to copy.
+
+The workflow publishes two outputs, `overall` and `summary`, carrying what the runner concluded. A
+caller that quotes the result anywhere should read those rather than the job's status: the job
+fails on purpose when a comparison finds something, and a caller that tolerates that failure sees
+it as a success. `.github/workflows/remediate.yml` is the worked example, running a capture and a
+compare under one run id around a deploy and writing the outcome into a draft pull request.
+
+No Phone Home secret has to live in the site's repository. A job granted `id-token: write` holds
+an OIDC token GitHub signed for it, naming the repository and run; `ci/site-token.sh` presents
+that to Phone Home, which checks the signature against GitHub's published keys and hands back the
+token of the site linked to that repository. Every grant is recorded there. A repository Phone
+Home has not linked passes a `phonehome_token` secret instead, and that always wins when set.
+
+A site that opts in to remediation copies two more files: `examples/remediate.yml`, the thin
+workflow Phone Home dispatches, and `examples/deploy-staging.yml`, the deploy contract. The second
+is the site's own deploy behind a `workflow_dispatch` trigger, and its one obligation is to not
+exit until the ref it was started on is live on staging, failing if it is not. The remediation
+workflow starts it, waits on it, and only compares when it succeeded; Phone Home refuses to
+dispatch to a site that has not named one.
 
 Three things decide whether a pair is comparable, and all three are enforced rather than assumed:
 
@@ -113,7 +132,14 @@ the report exists to communicate.
   itself mean the site is broken.
 - `failed` — a required element was missing, or the page returned an error status.
 - `inconclusive` — the run could not establish anything. A missing baseline, an unreachable site, a
-  manifest the site has not enabled, and a manifest with a typo all land here.
+  manifest the site has not enabled, and a manifest with a typo all land here. So does a comparison
+  that was told to expect a change (`PHV_EXPECT_CHANGE=1`, which `ddev verify run` and the
+  remediation workflow set) when the site reports the same Craft and plugin versions as at baseline:
+  the change never reached the environment, and a clean result about the old code is not evidence.
+
+Every comparison records what the site says moved since the baseline as `environment_delta`, by
+version, for Craft and each plugin. That, not the lock file, is what says the change arrived. A
+baseline captured before versions were recorded reads as unknown, never as unchanged.
 
 A required failure or an inconclusive result takes precedence in the overall summary, but every
 individual outcome stays visible in `result.json`.

@@ -56,6 +56,15 @@ export interface RunConfig {
      * missing required element on every page.
      */
     basicAuth: { username: string; password: string } | null;
+    /**
+     * Whether this comparison is verifying a change that should have reached the site.
+     *
+     * When set, a comparison against an environment reporting the same Craft and plugin versions
+     * as at baseline is inconclusive rather than a pass: it measured the environment as it already
+     * was, and a clean result about the old code is the exact thing a remediation must not carry
+     * into a pull request as evidence.
+     */
+    expectChange: boolean;
 }
 
 function required(name: string): string {
@@ -128,6 +137,7 @@ export function runConfig(): RunConfig {
         basicAuth: process.env.PHV_BASIC_AUTH_USER
             ? { username: process.env.PHV_BASIC_AUTH_USER, password: process.env.PHV_BASIC_AUTH_PASS ?? '' }
             : null,
+        expectChange: process.env.PHV_EXPECT_CHANGE === '1',
         // Resolved here rather than at each use. Two callers each defaulting to Date.now() disagree
         // by a millisecond and quietly write one run's evidence into two directories.
         attemptId: attemptId(mode),

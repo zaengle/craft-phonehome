@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+#
+# Composes the body of the draft pull request a remediation opens, from what the workflow's jobs
+# reported. Called by .github/workflows/remediate.yml; kept here so it can be run and read without
+# a GitHub runner.
+#
+# Every input is an environment variable, and every one is read for what it says rather than for
+# whether a job exited zero: a comparison that found something exits non-zero on purpose, and a
+# tolerated job failure reads as "success" to the workflow that tolerated it.
+#
+#   PATCH_ID               The Phone Home patch.
+#   ORIGIN                 The environment the change was verified against.
+#   MOVED, COUNT           What Composer moved, one "name before -> after" per line, and how many.
+#   CONTEXT                The remediation-context JSON from Phone Home, or empty if unreachable.
+#   BASELINE               The capture's outcome as the runner reported it.
+#   BASELINE_SUMMARY       One line on what the capture found.
+#   DEPLOYED               1 when the site's deploy workflow succeeded, otherwise anything else.
+#   DEPLOY_JOB             The deploy job's status, to tell "failed" from "never named".
+#   DEPLOY_RUN_URL         The deploy run, when one started.
+#   VERIFY_JOB             The compare job's status, to tell "skipped" from "produced nothing".
+#   VERIFICATION           The compare's outcome as the runner reported it.
+#   VERIFICATION_SUMMARY   One line on what the compare found.
+#   ENVIRONMENT            One line on what the site reports moved since the baseline.
+
+set -euo pipefail
+
+: "${PATCH_ID:=?}" "${ORIGIN:=the verification environment}" "${MOVED:=}" "${COUNT:=0}" "${CONTEXT:=}"
+: "${BASELINE:=}" "${BASELINE_SUMMARY:=}" "${DEPLOYED:=}" "${DEPLOY_JOB:=}" "${DEPLOY_RUN_URL:=}"
+: "${VERIFY_JOB:=}" "${VERIFICATION:=}" "${VERIFICATION_SUMMARY:=}" "${ENVIRONMENT:=}"
+
+# The judgement behind the change. The person merging should see why it exists and who already
+# agreed, not re-derive both from a lock file diff. A dashboard that could not be reached is said
+# so rather than left as a silent omission.
+if [ -n "$CONTEXT" ] && printf '%s' "$CONTEXT" | jq -e '.patch' >/dev/null 2>&1; then
+    why="$(printf '%s' "$CONTEXT" | jq -r '
+        "**Why** — [" + .patch.title + "](" + .patch.url + ")"
+            + (if .patch.severity then ", severity " + .patch.severity else "" end) + "."
+            + (if (.releases | length) > 0
+                then "\n\nFixes " + (.releases | map(.craft_handle + " " + .version + (if .ghsa_id then " (" + .ghsa_id + ")" else "" end)) | join(", ")) + "."
+                else "" end)
+            + (if .patch.severity_rationale then "\n\n> " + (.patch.severity_rationale | gsub("\r"; "") | gsub("\n"; "\n> ")) else "" end)
+            + "\n\nAssessed by " + (.patch.assessed_by // "nobody recorded")
+            + "; signed off by " + (if (.reviews | length) > 0 then (.reviews | map(.name) | join(", ")) else "nobody yet" end)
+            + "; dispatched by " + (.dispatched_by // "nobody recorded") + "."
+    ')"
+else
+    why="**Why** — Phone Home could not be reached for the assessment behind patch #${PATCH_ID}; it is on the patch page there."
+fi
+
+# A security patch that moves three packages and one that moves fifty are different things to
+# review, and the second should not arrive looking like the first.
+scale=""
+if [ "${COUNT:-0}" -gt 10 ] 2>/dev/null; then
+    scale="> [!WARNING]
+> This moves ${COUNT} packages. That is a dependency bump which happens to contain a security fix, not a security patch — review it as one."
+fi
+
+# One of three sentences, chosen from what actually happened, in the order things can go wrong:
+# no baseline, then no comparison, then the comparison's own verdict.
+if [ "$BASELINE" != "passed" ]; then
+    verdict="**Verification** — \`not run\`. The baseline of ${ORIGIN} could not be captured, so nothing was compared. ${BASELINE_SUMMARY:-The capture produced no result.}"
+elif [ "$VERIFY_JOB" = "skipped" ] || [ -z "$VERIFICATION" ]; then
+    verdict="**Verification** — \`not run\`. The baseline was captured but the comparison against ${ORIGIN} never produced a result."
+else
+    verdict="**Verification** — \`${VERIFICATION}\` against ${ORIGIN}. ${VERIFICATION_SUMMARY}"
+fi
+
+# Three states again: deployed, the deploy was attempted and failed, or none was named.
+if [ "$DEPLOYED" = "1" ]; then
+    deployed="Deployed to ${ORIGIN} by ${DEPLOY_RUN_URL}."
+elif [ "$DEPLOY_JOB" = "failure" ]; then
+    deployed="> [!WARNING]
+> The deploy to ${ORIGIN} failed${DEPLOY_RUN_URL:+ (${DEPLOY_RUN_URL})}, so nothing was compared. This change has not been rendered anywhere."
+else
+    deployed="> [!WARNING]
+> ${ORIGIN} was not deployed with this branch, so the comparison above measured the environment as it already was. It says nothing about this change."
+fi
+
+echo "Prepared by Phone Home for patch #${PATCH_ID}."
+echo
+echo "$why"
+echo
+if [ -n "$scale" ]; then
+    echo "$scale"
+    echo
+fi
+echo "**What moved**"
+echo
+echo '```'
+echo "$MOVED"
+echo '```'
+echo
+echo "$verdict"
+echo
+# What the site itself reported moving. This, not the lock file, is the evidence that the change
+# reached the environment the comparison was made against.
+if [ -n "$ENVIRONMENT" ]; then
+    echo "**${ENVIRONMENT}**"
+    echo
+fi
+echo "$deployed"
+echo
+echo "The full result, including before and after screenshots of anything that changed,"
+echo "is on the patch in Phone Home."
+echo
+echo "Opened as a draft on purpose. Nobody has merged anything."
