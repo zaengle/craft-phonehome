@@ -133,6 +133,76 @@ test.describe('site-token.sh', () => {
     });
 });
 
+/**
+ * A stand-in `gh` on PATH, answering the four calls the deploy script makes. The real one is not
+ * available outside a job, and the script's first version used a flag gh does not accept, which
+ * only running it could reveal.
+ */
+function fakeGh(behaviour: { runAppears: boolean; watchExit: number }): string {
+    const dir = mkdtempSync(join(tmpdir(), 'phv-gh-'));
+    const runs = behaviour.runAppears ? '[{"databaseId":42,"createdAt":"2999-01-01T00:00:00Z"},{"databaseId":41,"createdAt":"2000-01-01T00:00:00Z"}]' : '[]';
+
+    writeFileSync(
+        join(dir, 'gh'),
+        `#!/usr/bin/env bash
+case "$1 $2" in
+  "workflow run") exit 0 ;;
+  "run list") echo '${runs}' ;;
+  "run view") echo "https://github.com/z/x/actions/runs/$3" ;;
+  "run watch") exit ${behaviour.watchExit} ;;
+  *) echo "unexpected gh $*" >&2; exit 64 ;;
+esac`,
+    );
+    spawnSync('chmod', ['+x', join(dir, 'gh')]);
+
+    return dir;
+}
+
+function deployWatch(env: Record<string, string>, behaviour: { runAppears: boolean; watchExit: number }) {
+    const outputs = join(mkdtempSync(join(tmpdir(), 'phv-deploy-')), 'outputs');
+    writeFileSync(outputs, '');
+
+    const run = spawnSync('bash', [join(ci, 'deploy-watch.sh')], {
+        env: { PATH: `${fakeGh(behaviour)}:${process.env.PATH ?? ''}`, GITHUB_OUTPUT: outputs, DEPLOY_WATCH_ATTEMPTS: '2', DEPLOY_WATCH_INTERVAL: '0', BRANCH: 'security/patch-1-site-1', ...env },
+        encoding: 'utf8',
+    });
+
+    return { status: run.status, stderr: run.stderr, stdout: run.stdout, outputs: readFileSync(outputs, 'utf8') };
+}
+
+test.describe('deploy-watch.sh', () => {
+    test('a successful deploy run publishes deployed=1 and where it ran', () => {
+        const result = deployWatch({ DEPLOY_WORKFLOW: 'deploy-staging.yml' }, { runAppears: true, watchExit: 0 });
+
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.outputs).toContain('run_url=https://github.com/z/x/actions/runs/42\n');
+        expect(result.outputs).toContain('deployed=1\n');
+    });
+
+    test('a failed deploy run fails the step and says so', () => {
+        const result = deployWatch({ DEPLOY_WORKFLOW: 'deploy-staging.yml' }, { runAppears: true, watchExit: 1 });
+
+        expect(result.status).toBe(1);
+        expect(result.outputs).toContain('deployed=0\n');
+        expect(result.stdout).toContain('::error::The deploy run failed');
+    });
+
+    test('a dispatch that never produces a run fails rather than waiting forever', () => {
+        const result = deployWatch({ DEPLOY_WORKFLOW: 'deploy-staging.yml' }, { runAppears: false, watchExit: 0 });
+
+        expect(result.status).toBe(1);
+        expect(result.stdout).toContain('no run appeared');
+    });
+
+    test('no deploy workflow named is reported, not failed', () => {
+        const result = deployWatch({ DEPLOY_WORKFLOW: '' }, { runAppears: true, watchExit: 0 });
+
+        expect(result.status).toBe(0);
+        expect(result.outputs).toContain('deployed=0\n');
+        expect(result.stdout).toContain('::warning::');
+    });
+});
+
 function summarise(report: unknown): { stdout: string; outputs: string } {
     const dir = mkdtempSync(join(tmpdir(), 'phv-summarise-'));
     const result = join(dir, 'result.json');

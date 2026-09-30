@@ -7,16 +7,16 @@ import { describeEnvironmentDelta, readPackages } from '../../src/manifest';
  * baseline that predates package snapshots must not read as "nothing moved".
  */
 test.describe('readPackages', () => {
-    test('keys Craft by its Composer name and plugins by handle', () => {
+    test('keys Craft and plugins by Composer name, falling back to the handle', () => {
         const packages = readPackages({
             craft_version: '5.8.14',
             plugins: {
-                formie: { name: 'Formie', version: '3.0.1' },
+                formie: { name: 'Formie', version: '3.0.1', package_name: 'verbb/formie' },
                 seomatic: { name: 'SEOmatic', version: '5.1.0' },
             },
         });
 
-        expect(packages).toEqual({ 'craftcms/cms': '5.8.14', formie: '3.0.1', seomatic: '5.1.0' });
+        expect(packages).toEqual({ 'craftcms/cms': '5.8.14', 'verbb/formie': '3.0.1', seomatic: '5.1.0' });
     });
 
     test('ignores what it cannot read rather than guessing', () => {
@@ -35,16 +35,19 @@ test.describe('readPackages', () => {
 
 test.describe('describeEnvironmentDelta', () => {
     test('a baseline without package versions is unknown, not unchanged', () => {
-        const delta = describeEnvironmentDelta(undefined, { 'craftcms/cms': '5.8.14' });
+        for (const before of [undefined, {}]) {
+            const delta = describeEnvironmentDelta(before, { 'craftcms/cms': '5.8.14' });
 
-        expect(delta.known).toBe(false);
-        expect(delta.changed).toEqual([]);
+            expect(delta.known).toBe(false);
+            expect(delta.changed).toEqual([]);
+            expect(delta.current).toEqual({ 'craftcms/cms': '5.8.14' });
+        }
     });
 
     test('identical versions are a known, empty delta', () => {
         const versions = { 'craftcms/cms': '5.8.14', formie: '3.0.1' };
 
-        expect(describeEnvironmentDelta(versions, { ...versions })).toEqual({ known: true, changed: [] });
+        expect(describeEnvironmentDelta(versions, { ...versions })).toEqual({ known: true, changed: [], current: versions });
     });
 
     test('names every package that moved, was added or was removed, in a stable order', () => {
@@ -53,13 +56,11 @@ test.describe('describeEnvironmentDelta', () => {
             { 'craftcms/cms': '5.8.15', formie: '3.0.1', added: '0.1.0' },
         );
 
-        expect(delta).toEqual({
-            known: true,
-            changed: [
-                { name: 'added', before: null, after: '0.1.0' },
-                { name: 'craftcms/cms', before: '5.8.14', after: '5.8.15' },
-                { name: 'retired', before: '1.0.0', after: null },
-            ],
-        });
+        expect(delta.known).toBe(true);
+        expect(delta.changed).toEqual([
+            { name: 'added', before: null, after: '0.1.0' },
+            { name: 'craftcms/cms', before: '5.8.14', after: '5.8.15' },
+            { name: 'retired', before: '1.0.0', after: null },
+        ]);
     });
 });

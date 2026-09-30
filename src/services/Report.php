@@ -649,6 +649,9 @@ class Report extends Component
                     $handle => [
                         'name' => $info['name'] ?? $handle,
                         'handle' => $handle,
+                        // The Composer name, which is how a remediation names what it asked to
+                        // move. Null on the rare plugin Craft cannot attribute to a package.
+                        'package_name' => is_string($info['packageName'] ?? null) ? $info['packageName'] : null,
                         'description' => $info['description'],
                         'version' => $info['version'] ?? 'unknown',
                         'is_installed' => $info['isInstalled'],

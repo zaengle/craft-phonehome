@@ -65,6 +65,12 @@ export interface RunConfig {
      * into a pull request as evidence.
      */
     expectChange: boolean;
+    /**
+     * With `expectChange`: the one package the deploy should have moved, and the version the site
+     * must now report it at. Any other package moving is not evidence that this one did.
+     */
+    expectPackage: string | null;
+    expectVersion: string | null;
 }
 
 function required(name: string): string {
@@ -138,6 +144,8 @@ export function runConfig(): RunConfig {
             ? { username: process.env.PHV_BASIC_AUTH_USER, password: process.env.PHV_BASIC_AUTH_PASS ?? '' }
             : null,
         expectChange: process.env.PHV_EXPECT_CHANGE === '1',
+        expectPackage: process.env.PHV_EXPECT_PACKAGE?.trim() || null,
+        expectVersion: process.env.PHV_EXPECT_VERSION?.trim() || null,
         // Resolved here rather than at each use. Two callers each defaulting to Date.now() disagree
         // by a millisecond and quietly write one run's evidence into two directories.
         attemptId: attemptId(mode),

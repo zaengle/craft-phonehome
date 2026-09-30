@@ -37,9 +37,9 @@ permissions:
   id-token: write
 
 concurrency:
-  # One remediation at a time per branch. A second dispatch for the same patch and site names the
-  # same branch and is declined by the shared workflow; this keeps the two from racing to find out.
-  group: remediate-${{ inputs.branch }}
+  # One remediation at a time per verification environment. Two patches in flight for one site
+  # would otherwise capture, deploy and compare over each other on the same staging target.
+  group: remediate-${{ inputs.verify_origin }}
   cancel-in-progress: false
 
 jobs:

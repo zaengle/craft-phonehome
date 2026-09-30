@@ -619,10 +619,15 @@ export function readPackages(payload: Record<string, unknown>): Record<string, s
 
     if (plugins !== null && typeof plugins === 'object' && !Array.isArray(plugins)) {
         for (const [handle, info] of Object.entries(plugins as Record<string, unknown>)) {
-            const version = (info as { version?: unknown } | null)?.version;
+            const plugin = info as { version?: unknown; package_name?: unknown } | null;
+            const version = plugin?.version;
 
             if (typeof version === 'string') {
-                packages[handle] = version;
+                // Keyed by Composer name where the plugin reports one, because that is how a
+                // remediation names what it asked to move; by handle on older plugin versions.
+                const name = typeof plugin?.package_name === 'string' && plugin.package_name !== '' ? plugin.package_name : handle;
+
+                packages[name] = version;
             }
         }
     }
@@ -641,11 +646,15 @@ export function readPackages(payload: Record<string, unknown>): Record<string, s
 export interface EnvironmentDelta {
     known: boolean;
     changed: { name: string; before: string | null; after: string | null }[];
+    /** Every version the site reports now, so a caller can ask about a package that did not move. */
+    current: Record<string, string>;
 }
 
 export function describeEnvironmentDelta(before: Record<string, string> | undefined, after: Record<string, string>): EnvironmentDelta {
-    if (before === undefined) {
-        return { known: false, changed: [] };
+    // A baseline that recorded nothing is as uninformative as one that recorded no field at all:
+    // an empty map is a site that reported no versions, not a site with no packages.
+    if (before === undefined || Object.keys(before).length === 0) {
+        return { known: false, changed: [], current: after };
     }
 
     const names = [...new Set([...Object.keys(before), ...Object.keys(after)])].sort();
@@ -653,7 +662,7 @@ export function describeEnvironmentDelta(before: Record<string, string> | undefi
         .filter((name) => before[name] !== after[name])
         .map((name) => ({ name, before: before[name] ?? null, after: after[name] ?? null }));
 
-    return { known: true, changed };
+    return { known: true, changed, current: after };
 }
 
 export function isAbort<T extends object>(value: T | Abort): value is Abort {

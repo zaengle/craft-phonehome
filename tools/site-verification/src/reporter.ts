@@ -182,11 +182,27 @@ export default class VerificationReporter implements Reporter {
         }
 
         let diagnostic: string | null = null;
+        const origin = this.config.origin;
+        const pkg = this.config.expectPackage;
+        const wanted = this.config.expectVersion?.replace(/^v/i, '') ?? null;
 
         if (environment === null || !environment.known) {
-            diagnostic = `${INCONCLUSIVE} not_deployed — the baseline records no package versions, so whether the change reached ${this.config.origin} cannot be established.`;
+            diagnostic = `${INCONCLUSIVE} not_deployed — the baseline records no package versions, so whether the change reached ${origin} cannot be established.`;
+        } else if (pkg !== null) {
+            // The requested package specifically. Something else moving is not evidence that this
+            // did, and a package vanishing from the response is not evidence of anything.
+            const reported = environment.current[pkg]?.replace(/^v/i, '') ?? null;
+            const moved = environment.changed.some((entry) => entry.name === pkg);
+
+            if (reported === null) {
+                diagnostic = `${INCONCLUSIVE} not_deployed — ${origin} does not report ${pkg} at all, so whether the requested update reached it cannot be established.`;
+            } else if (wanted !== null && reported !== wanted) {
+                diagnostic = `${INCONCLUSIVE} not_deployed — ${origin} reports ${pkg} at ${reported}, not the requested ${wanted}. The comparison is not of the requested change.`;
+            } else if (!moved) {
+                diagnostic = `${INCONCLUSIVE} not_deployed — ${origin} already reported ${pkg} at ${reported} when the baseline was captured, so this comparison spans no change to it.`;
+            }
         } else if (environment.changed.length === 0) {
-            diagnostic = `${INCONCLUSIVE} not_deployed — ${this.config.origin} reports the same Craft and plugin versions as at baseline, so the change never reached it. The comparison measured the environment as it already was.`;
+            diagnostic = `${INCONCLUSIVE} not_deployed — ${origin} reports the same Craft and plugin versions as at baseline, so the change never reached it. The comparison measured the environment as it already was.`;
         }
 
         if (diagnostic !== null) {

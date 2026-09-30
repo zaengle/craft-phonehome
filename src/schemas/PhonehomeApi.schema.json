@@ -361,6 +361,13 @@
           "is_upgrade_available": {
             "type": "boolean",
             "description": "Whether an upgrade is available for the plugin"
+          },
+          "package_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The plugin's Composer package name, e.g. verbb/formie. Null when Craft cannot attribute the plugin to a package"
           }
         }
       }

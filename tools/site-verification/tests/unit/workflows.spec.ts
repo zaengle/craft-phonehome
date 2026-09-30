@@ -54,8 +54,24 @@ test('the pull request is opened whatever the verification concluded, as long as
 });
 
 test('the runner follows the workflow file it was released with', () => {
-    expect(remediate.match(/github\.job_workflow_sha/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
-    expect(verification).toContain('${{ inputs.runner_ref || github.job_workflow_sha }}');
+    // `job.workflow_sha` is the documented context; `github.job_workflow_sha` does not exist and
+    // an earlier version of this file asserted it into place.
+    expect(remediate).toContain('runner_ref=${{ inputs.runner_ref || job.workflow_sha }}');
+    expect(remediate).not.toContain('job_workflow_sha');
+    expect(remediate.match(/^\s+ref: \$\{\{ needs\.check\.outputs\.runner_ref \}\}$/gm)?.length ?? 0).toBe(2);
+    expect(remediate.match(/^\s+runner_ref: \$\{\{ needs\.check\.outputs\.runner_ref \}\}$/gm)?.length ?? 0).toBe(2);
+    expect(verification).toContain('${{ inputs.runner_ref || job.workflow_sha }}');
+});
+
+test('the comparison is told which package must have moved', () => {
+    expect(job('verify')).toContain('expect_package: ${{ inputs.package }}');
+    expect(job('verify')).toContain('expect_version: ${{ inputs.version }}');
+});
+
+test('a branch left by a failed run is picked up rather than declined', () => {
+    expect(job('prepare')).toContain("if: needs.check.outputs.existing == '0'");
+    expect(job('deploy')).toContain("needs.prepare.result == 'skipped'");
+    expect(job('pull_request')).toContain("needs.check.outputs.has_pr == '0'");
 });
 
 test('the wrapper publishes the outcome for callers rather than leaving them a job status', () => {
