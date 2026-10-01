@@ -39,9 +39,10 @@ permissions:
   id-token: write
 
 concurrency:
-  # One remediation at a time per verification environment. Two patches in flight for one site
-  # would otherwise capture, deploy and compare over each other on the same staging target.
-  group: remediate-${{ inputs.verify_origin || 'unverified' }}
+  # One verification pair at a time per environment. The group is named the same way in
+  # verify-on-deploy.yml, so a remediation and a deploy of main cannot capture, deploy and compare
+  # over each other on the same environment.
+  group: verify-${{ inputs.verify_origin || 'unverified' }}
   cancel-in-progress: false
 
 jobs:
@@ -49,6 +50,7 @@ jobs:
     uses: zaengle/craft-phonehome/.github/workflows/remediate.yml@1.8.0 # the release tag; the runner follows this file's commit, so this is the one thing to pin
     with:
       patch_id: ${{ inputs.patch_id }}
+      site_id: ${{ inputs.site_id }}
       branch: ${{ inputs.branch }}
       package: ${{ inputs.package }}
       version: ${{ inputs.version }}

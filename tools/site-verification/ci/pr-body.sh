@@ -110,7 +110,15 @@ if [ -n "$deployed" ]; then
     echo "$deployed"
     echo
 fi
-echo "The full result, including before and after screenshots of anything that changed,"
-echo "is on the patch in Phone Home."
-echo
+# What was verified, and the limits of that. Promising screenshots of a comparison that never ran
+# would send a reviewer looking for evidence that does not exist.
+if [ -n "$ORIGIN" ]; then
+    echo "The full result, including before and after screenshots of anything that changed,"
+    echo "is on the patch in Phone Home."
+    echo
+    echo "What this verified is the pages the site declared, rendered before and after the change."
+    echo "It did not exercise forms, the control panel, queue jobs, console commands, or anything"
+    echo "that calls the site's API."
+    echo
+fi
 echo "Opened as a draft on purpose. Nobody has merged anything."

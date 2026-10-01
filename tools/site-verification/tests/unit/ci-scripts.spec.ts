@@ -45,6 +45,7 @@ test.describe('pr-body.sh', () => {
         expect(body).toContain('**Verification** — `changes_detected` against https://staging.example. 1 of 9 checks did not pass');
         expect(body).toContain('Deployed to https://staging.example by https://github.com/z/x/actions/runs/9.');
         expect(body).toContain('**Environment: craftcms/cms 5.8.14 → 5.8.15.**');
+        expect(body).toContain('It did not exercise forms, the control panel, queue jobs, console commands');
         expect(body).not.toContain('[!WARNING]');
     });
 
@@ -80,6 +81,7 @@ test.describe('pr-body.sh', () => {
         expect(body).toContain('Review it as you would any dependency update.');
         expect(body).not.toContain('could not be captured');
         expect(body).not.toContain('was not deployed with this branch');
+        expect(body).not.toContain('screenshots');
         expect(body).not.toContain('[!WARNING]');
     });
 

@@ -2,7 +2,8 @@
 # existing deploy between the two halves.
 #
 # The shape is: freeze a baseline, deploy, compare against the frozen copy. Both halves must share
-# a run id, and it must be one this site has not used before — the commit SHA does both jobs.
+# a run id, and it must be one this site has not used before — the commit SHA plus the run attempt
+# does both jobs, and a re-run of the pair gets a fresh identity rather than a refused baseline.
 #
 # What this needs before it will run:
 #
@@ -27,8 +28,9 @@ on:
 
 concurrency:
   # A second deploy starting mid-pair would compare the new baseline against the old site. The
-  # pair is only meaningful uninterrupted.
-  group: verify-${{ github.ref }}
+  # pair is only meaningful uninterrupted, so the group is the environment, named the same way in
+  # remediate.yml, rather than the branch.
+  group: verify-https://STAGING_ORIGIN_TO_FILL_IN
   cancel-in-progress: false
 
 jobs:
@@ -36,7 +38,7 @@ jobs:
     uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@1.8.0 # the release tag; the runner follows this file's commit, so this is the one thing to pin
     with:
       mode: capture
-      run_id: ${{ github.sha }}
+      run_id: ${{ github.sha }}-${{ github.run_attempt }}
       origin: https://staging.example.com
       dashboard_origin: https://phone-home.example.com
     secrets:
@@ -55,7 +57,7 @@ jobs:
     uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@1.8.0
     with:
       mode: compare
-      run_id: ${{ github.sha }}
+      run_id: ${{ github.sha }}-${{ github.run_attempt }}
       origin: https://staging.example.com
       dashboard_origin: https://phone-home.example.com
     secrets:

@@ -90,8 +90,27 @@ test('a run can prove its identity in place of a secret', () => {
 test('a dispatch with no environment skips the pair and still opens the pull request', () => {
     // Phone Home sends an empty origin for a site that cannot deploy. Nothing may then be captured
     // or compared, and the pull request job must not depend on either having run.
-    expect(remediate).toMatch(/verify_origin:\n(?:.*\n)*? {8}required: false/);
+    // The input's own block, from its key to the next key at the same depth, so a `required: false`
+    // on a later input cannot satisfy this.
+    const verifyOrigin = remediate.match(/\n {6}verify_origin:\n((?: {8}.*\n)+)/)?.[1] ?? '';
+    expect(verifyOrigin).toContain('required: false');
     expect(job('baseline')).toContain("if: needs.check.outputs.has_pr == '0' && inputs.verify_origin != ''");
     expect(job('pull_request').match(/\n {4}if: (.*)\n/)?.[1]).not.toContain('needs.baseline');
     expect(job('pull_request').match(/\n {4}if: (.*)\n/)?.[1]).not.toContain('needs.verify');
+});
+
+test('a re-run gets its own baseline identity', () => {
+    expect(remediate).toContain('run_id=remediation-${{ inputs.patch_id }}-${{ github.run_id }}-${{ github.run_attempt }}');
+});
+
+test('a pushed branch gets its pull request even when Phone Home cannot be reached', () => {
+    expect(job('pull_request')).toContain('site-token.sh || true');
+    expect(job('pull_request')).toContain("if: steps.pr.outputs.url != '' && env.PHONEHOME_TOKEN != ''");
+});
+
+test('the nested verification workflow names a ref that exists', () => {
+    // The plugin repository has no `main`; its default branch is `develop`, and this file is on a
+    // feature branch until it is released.
+    expect(remediate).not.toContain('site-verification.yml@main');
+    expect(remediate.match(/site-verification\.yml@feature\/verification-manifest-poc/g)?.length ?? 0).toBe(2);
 });
