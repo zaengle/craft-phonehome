@@ -12,6 +12,11 @@
 # branch on it, and `verify` compares against the frozen copy. Both halves name the same run id,
 # which is what lets the second half find the first: the baseline lives in Phone Home, not on the
 # runner, and a comparison that asks for a run id nobody captured under is inconclusive, not a pass.
+#
+# A site with no environment to verify on is dispatched with an empty `verify_origin`. Then there
+# is no pair: the branch is pushed and the pull request opened, and the body says plainly that it
+# was not verified, so whoever merges it knows they are relying on their own review. That is the
+# ordinary dependency-update shape, and it is what Phone Home offers a site that cannot deploy.
 name: Prepare security remediation
 
 on:
@@ -28,9 +33,12 @@ on:
         type: string
       version: { required: true, type: string }
       verify_origin:
-        description: 'The environment the change is verified against. Never production.'
-        required: true
+        description: >-
+          The environment the change is deployed to and verified against. Empty means there is
+          none: no capture, no deploy and no comparison, and the pull request is marked unverified.
+        required: false
         type: string
+        default: ''
       dashboard_origin: { required: true, type: string }
       deploy_workflow:
         description: >-
@@ -130,7 +138,7 @@ jobs:
   # and its inputs are kept backward compatible for that reason.
   baseline:
     needs: check
-    if: needs.check.outputs.has_pr == '0'
+    if: needs.check.outputs.has_pr == '0' && inputs.verify_origin != ''
     uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@main
     with:
       mode: capture
@@ -175,6 +183,7 @@ jobs:
           # assumed to be small.
           composer update "${{ inputs.package }}:${{ inputs.version }}" --with-all-dependencies --no-interaction --no-scripts
 
+          # shellcheck disable=SC2016
           moved="$(php -r '
             $read = fn(string $f): array => array_column(json_decode(file_get_contents($f), true)["packages"] ?? [], "version", "name");
             $before = $read("composer.lock.before");

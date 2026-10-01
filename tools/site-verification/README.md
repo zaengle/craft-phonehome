@@ -95,12 +95,13 @@ that to Phone Home, which checks the signature against GitHub's published keys a
 token of the site linked to that repository. Every grant is recorded there. A repository Phone
 Home has not linked passes a `phonehome_token` secret instead, and that always wins when set.
 
-A site that opts in to remediation copies two more files: `examples/remediate.yml`, the thin
-workflow Phone Home dispatches, and `examples/deploy-staging.yml`, the deploy contract. The second
-is the site's own deploy behind a `workflow_dispatch` trigger, and its one obligation is to not
-exit until the ref it was started on is live on staging, failing if it is not. The remediation
-workflow starts it, waits on it, and only compares when it succeeded; Phone Home refuses to
-dispatch to a site that has not named one.
+A site that opts in to remediation copies `examples/remediate.yml`, the thin workflow Phone Home
+dispatches. A site that can deploy also copies `examples/deploy-staging.yml`, the deploy contract:
+the site's own deploy behind a `workflow_dispatch` trigger, whose one obligation is to not exit
+until the ref it was started on is live on the verification environment, failing if it is not.
+The remediation workflow starts it, waits on it, and only compares when it succeeded. A site that
+names no deploy workflow is dispatched with no environment at all; the branch is pushed and the
+pull request opened, marked as not verified, and that is the whole of what it gets.
 
 Three things decide whether a pair is comparable, and all three are enforced rather than assumed:
 

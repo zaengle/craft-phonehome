@@ -9,7 +9,8 @@
 # tolerated job failure reads as "success" to the workflow that tolerated it.
 #
 #   PATCH_ID               The Phone Home patch.
-#   ORIGIN                 The environment the change was verified against.
+#   ORIGIN                 The environment the change was verified against. Empty means the site
+#                          has none and the pull request was opened without verification.
 #   MOVED, COUNT           What Composer moved, one "name before -> after" per line, and how many.
 #   CONTEXT                The remediation-context JSON from Phone Home, or empty if unreachable.
 #   BASELINE               The capture's outcome as the runner reported it.
@@ -24,7 +25,7 @@
 
 set -euo pipefail
 
-: "${PATCH_ID:=?}" "${ORIGIN:=the verification environment}" "${MOVED:=}" "${COUNT:=0}" "${CONTEXT:=}"
+: "${PATCH_ID:=?}" "${ORIGIN:=}" "${MOVED:=}" "${COUNT:=0}" "${CONTEXT:=}"
 : "${BASELINE:=}" "${BASELINE_SUMMARY:=}" "${DEPLOYED:=}" "${DEPLOY_JOB:=}" "${DEPLOY_RUN_URL:=}"
 : "${VERIFY_JOB:=}" "${VERIFICATION:=}" "${VERIFICATION_SUMMARY:=}" "${ENVIRONMENT:=}"
 
@@ -55,9 +56,13 @@ if [ "${COUNT:-0}" -gt 10 ] 2>/dev/null; then
 > This moves ${COUNT} packages. That is a dependency bump which happens to contain a security fix, not a security patch — review it as one."
 fi
 
-# One of three sentences, chosen from what actually happened, in the order things can go wrong:
+# One of four sentences, chosen from what actually happened. No environment at all comes first,
+# because it is a different kind of pull request rather than a verification that went wrong; then
 # no baseline, then no comparison, then the comparison's own verdict.
-if [ "$BASELINE" != "passed" ]; then
+if [ -z "$ORIGIN" ]; then
+    verdict="> [!IMPORTANT]
+> **Not verified.** This site has no environment to verify on, so this pull request was opened without deploying or comparing anything. Review it as you would any dependency update."
+elif [ "$BASELINE" != "passed" ]; then
     verdict="**Verification** — \`not run\`. The baseline of ${ORIGIN} could not be captured, so nothing was compared. ${BASELINE_SUMMARY:-The capture produced no result.}"
 elif [ "$VERIFY_JOB" = "skipped" ] || [ -z "$VERIFICATION" ]; then
     verdict="**Verification** — \`not run\`. The baseline was captured but the comparison against ${ORIGIN} never produced a result."
@@ -65,8 +70,11 @@ else
     verdict="**Verification** — \`${VERIFICATION}\` against ${ORIGIN}. ${VERIFICATION_SUMMARY}"
 fi
 
-# Three states again: deployed, the deploy was attempted and failed, or none was named.
-if [ "$DEPLOYED" = "1" ]; then
+# Three states again: deployed, the deploy was attempted and failed, or none was named. With no
+# environment the verdict above has already said everything, and a warning here would repeat it.
+if [ -z "$ORIGIN" ]; then
+    deployed=""
+elif [ "$DEPLOYED" = "1" ]; then
     deployed="Deployed to ${ORIGIN} by ${DEPLOY_RUN_URL}."
 elif [ "$DEPLOY_JOB" = "failure" ]; then
     deployed="> [!WARNING]
@@ -98,8 +106,10 @@ if [ -n "$ENVIRONMENT" ]; then
     echo "**${ENVIRONMENT}**"
     echo
 fi
-echo "$deployed"
-echo
+if [ -n "$deployed" ]; then
+    echo "$deployed"
+    echo
+fi
 echo "The full result, including before and after screenshots of anything that changed,"
 echo "is on the patch in Phone Home."
 echo

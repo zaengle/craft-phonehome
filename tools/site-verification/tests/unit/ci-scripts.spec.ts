@@ -73,6 +73,16 @@ test.describe('pr-body.sh', () => {
         expect(body).toContain('The deploy to https://staging.example failed (https://github.com/z/x/actions/runs/9), so nothing was compared.');
     });
 
+    test('no environment at all is a different kind of pull request, not a failed verification', () => {
+        const body = prBody({ ...verified, ORIGIN: '', BASELINE: '', BASELINE_SUMMARY: '', DEPLOYED: '', DEPLOY_JOB: 'skipped', DEPLOY_RUN_URL: '', VERIFY_JOB: 'skipped', VERIFICATION: '', VERIFICATION_SUMMARY: '', ENVIRONMENT: '' });
+
+        expect(body).toContain('**Not verified.** This site has no environment to verify on');
+        expect(body).toContain('Review it as you would any dependency update.');
+        expect(body).not.toContain('could not be captured');
+        expect(body).not.toContain('was not deployed with this branch');
+        expect(body).not.toContain('[!WARNING]');
+    });
+
     test('a large move is labelled a dependency bump', () => {
         const body = prBody({ ...verified, COUNT: '54' });
 

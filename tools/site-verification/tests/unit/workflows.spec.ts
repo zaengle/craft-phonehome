@@ -86,3 +86,12 @@ test('a run can prove its identity in place of a secret', () => {
     expect(verification).toContain('id-token: write');
     expect(verification).toMatch(/phonehome_token:\n(?:.*\n)*? {8}required: false/);
 });
+
+test('a dispatch with no environment skips the pair and still opens the pull request', () => {
+    // Phone Home sends an empty origin for a site that cannot deploy. Nothing may then be captured
+    // or compared, and the pull request job must not depend on either having run.
+    expect(remediate).toMatch(/verify_origin:\n(?:.*\n)*? {8}required: false/);
+    expect(job('baseline')).toContain("if: needs.check.outputs.has_pr == '0' && inputs.verify_origin != ''");
+    expect(job('pull_request').match(/\n {4}if: (.*)\n/)?.[1]).not.toContain('needs.baseline');
+    expect(job('pull_request').match(/\n {4}if: (.*)\n/)?.[1]).not.toContain('needs.verify');
+});

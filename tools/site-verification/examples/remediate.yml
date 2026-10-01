@@ -23,7 +23,9 @@ on:
       branch: { required: true, type: string }
       package: { required: true, type: string }
       version: { required: true, type: string }
-      verify_origin: { required: true, type: string }
+      # Empty when the site has no environment to verify on; the pull request is then opened
+      # unverified and says so.
+      verify_origin: { required: false, type: string, default: '' }
       dashboard_origin: { required: true, type: string }
       deploy_workflow: { required: false, type: string, default: '' }
 
@@ -39,7 +41,7 @@ permissions:
 concurrency:
   # One remediation at a time per verification environment. Two patches in flight for one site
   # would otherwise capture, deploy and compare over each other on the same staging target.
-  group: remediate-${{ inputs.verify_origin }}
+  group: remediate-${{ inputs.verify_origin || 'unverified' }}
   cancel-in-progress: false
 
 jobs:

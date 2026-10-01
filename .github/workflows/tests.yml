@@ -67,7 +67,10 @@ jobs:
       - name: Lint the workflows
         uses: docker://rhysd/actionlint:1.7.7
         with:
-          args: -color
+          # `job.workflow_sha` is a documented context (the commit of the workflow file defining the
+          # job) that this actionlint release does not know about yet; the runner pin depends on it.
+          args: -color -ignore 'property "workflow_sha" is not defined in object type'
+
 
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
