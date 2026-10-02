@@ -12,7 +12,7 @@
  * $GITHUB_OUTPUT when those are set, and prints the summary to stdout either way.
  */
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 /** @param {unknown} delta */
 export function describeEnvironment(delta) {
@@ -39,22 +39,29 @@ export function describeEnvironment(delta) {
  * @param {Record<string, any>} report
  * @return {{ overall: string; summary: string; environment: string; markdown: string }}
  */
-export function summarise(report) {
+export function summarise(report, unstoredBaseline = null) {
     const checks = Array.isArray(report.checks) ? report.checks : [];
     const failing = checks.filter((check) => check.outcome !== 'passed');
-    const overall = typeof report.overall === 'string' ? report.overall : '';
+    // A capture whose baseline could not be stored is not a usable reference, whatever its checks
+    // found, so it is published as inconclusive and the reason leads the summary.
+    const overall = unstoredBaseline !== null ? 'inconclusive' : typeof report.overall === 'string' ? report.overall : '';
     const environment = describeEnvironment(report.environment_delta);
 
     const named = failing
         .slice(0, 6)
         .map((check) => `${check.kind}:${check.id} ${check.outcome}`)
         .join(', ');
-    const summary =
+    let summary =
         failing.length === 0
             ? `${checks.length} checks passed.`
             : `${failing.length} of ${checks.length} checks did not pass: ${named}${failing.length > 6 ? ', …' : ''}.`;
 
     const lines = [`## Verification: ${overall.toUpperCase() || 'UNKNOWN'}`, ''];
+
+    if (unstoredBaseline !== null) {
+        summary = `The baseline could not be stored on Phone Home (${unstoredBaseline}), so nothing can be compared against this capture. ${summary}`;
+        lines.push(`**The baseline could not be stored on Phone Home:** ${unstoredBaseline}. Nothing can be compared against this capture.`, '');
+    }
     const missing = Array.isArray(report.missing_checks) ? report.missing_checks : [];
     const warnings = Array.isArray(report.manifest_warnings) ? report.manifest_warnings : [];
 
@@ -96,7 +103,8 @@ function main() {
     }
 
     const report = JSON.parse(readFileSync(resolve(path), 'utf8'));
-    const result = summarise(report);
+    const unstored = join(dirname(resolve(path)), 'baseline-unstored.txt');
+    const result = summarise(report, existsSync(unstored) ? readFileSync(unstored, 'utf8').trim() : null);
 
     process.stdout.write(result.markdown);
     if (stepSummary) appendFileSync(stepSummary, result.markdown);

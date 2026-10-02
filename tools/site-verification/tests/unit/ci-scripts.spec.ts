@@ -215,13 +215,16 @@ test.describe('deploy-watch.sh', () => {
     });
 });
 
-function summarise(report: unknown): { stdout: string; outputs: string } {
+function summarise(report: unknown, unstoredBaseline: string | null = null): { stdout: string; outputs: string } {
     const dir = mkdtempSync(join(tmpdir(), 'phv-summarise-'));
     const result = join(dir, 'result.json');
     const outputs = join(dir, 'outputs');
 
     writeFileSync(result, JSON.stringify(report));
     writeFileSync(outputs, '');
+    if (unstoredBaseline !== null) {
+        writeFileSync(join(dir, 'baseline-unstored.txt'), unstoredBaseline);
+    }
 
     const run = spawnSync('node', [join(ci, 'summarise.mjs'), result], {
         env: { PATH: process.env.PATH ?? '', GITHUB_OUTPUT: outputs },
@@ -234,6 +237,17 @@ function summarise(report: unknown): { stdout: string; outputs: string } {
 }
 
 test.describe('summarise.mjs', () => {
+    test('a capture whose baseline was not stored is inconclusive, however its checks went', () => {
+        const { stdout, outputs } = summarise(
+            { overall: 'passed', mode: 'capture', checks: [{ id: 'home', kind: 'assert', outcome: 'passed', diagnostic: null }] },
+            'about.png: HTTP 500',
+        );
+
+        expect(outputs).toContain('overall=inconclusive');
+        expect(outputs).toContain('summary=The baseline could not be stored on Phone Home (about.png: HTTP 500)');
+        expect(stdout).toContain('## Verification: INCONCLUSIVE');
+    });
+
     test('publishes the outcome and names the checks that did not pass', () => {
         const { stdout, outputs } = summarise({
             overall: 'changes_detected',

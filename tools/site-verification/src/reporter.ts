@@ -263,6 +263,14 @@ export default class VerificationReporter implements Reporter {
         process.stdout.write(
             pushed.ok ? `  baseline stored on ${this.config.dashboardOrigin} (${pushed.detail})\n` : `  ⚠  could not store the baseline: ${pushed.detail}\n`,
         );
+
+        // The result is already written by now and must stay a true account of what the capture
+        // saw. But a capture whose baseline never reached the dashboard cannot be compared against,
+        // so the fact is left beside the result for the CI summary to read, which then reports the
+        // capture as inconclusive rather than letting a deploy and a comparison proceed on it.
+        if (!pushed.ok) {
+            writeFileSync(join(this.config.bundleDir, 'baseline-unstored.txt'), pushed.detail);
+        }
     }
 
     /**
