@@ -41,7 +41,7 @@ jobs:
   pair:
     runs-on: ubuntu-latest
     outputs:
-      run_id: ${{ needs.pair.outputs.run_id }}
+      run_id: ${{ github.sha }}-${{ github.run_attempt }}
     steps:
       - run: echo "run id ${{ github.sha }}-${{ github.run_attempt }}"
 
