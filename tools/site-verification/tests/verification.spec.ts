@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Response } from '@playwright/test';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runConfig } from '../src/config';
 import { bundlePaths, readFrozenManifest, type Abort } from '../src/manifest';
@@ -297,6 +297,23 @@ if (existsSync(paths.abort)) {
                 fullPage: config.fullPage,
                 mask: (page.mask ?? []).map((selector) => browserPage.locator(selector)),
             });
+
+            // A screenshot that matched leaves nothing on disk, and the dashboard shows every page's
+            // pair whether or not it changed, so the pair is written here on a pass: the baseline as
+            // held, and the page as it renders now. A failed match already left all three files.
+            if (config.mode === 'compare') {
+                const passed = join(test.info().outputDir, 'passed');
+                const expected = join(paths.snapshots, `${page.id}.png`);
+                mkdirSync(passed, { recursive: true });
+                if (existsSync(expected)) {
+                    copyFileSync(expected, join(passed, `${page.id}-expected.png`));
+                }
+                await browserPage.screenshot({
+                    path: join(passed, `${page.id}-actual.png`),
+                    fullPage: config.fullPage,
+                    mask: (page.mask ?? []).map((selector) => browserPage.locator(selector)),
+                });
+            }
         });
     }
 }

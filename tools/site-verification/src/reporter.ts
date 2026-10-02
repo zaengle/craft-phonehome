@@ -274,13 +274,13 @@ export default class VerificationReporter implements Reporter {
     }
 
     /**
-     * Sends the screenshots behind a changed or failed check.
+     * Sends the screenshots behind every compared page: baseline, now, and the difference where
+     * there was one.
      *
      * Comparisons only. A capture writes an `-actual.png` for every page as it establishes each
-     * baseline, and those are not a change -- sending them would double the stored bytes on every
-     * capture and file the baseline itself under "what changed". Within a comparison Playwright
-     * writes these only where a screenshot check failed, so a run where nothing moved sends
-     * nothing.
+     * baseline, and those are not a comparison of anything. Within a comparison Playwright writes
+     * all three files where a screenshot check failed, and the spec writes the baseline and the
+     * current page where it passed, so a reviewer sees what the pass looked like as well.
      *
      * Like the result itself this cannot fail the run: the images are already on disk next to the
      * result, and the report they belong to has already arrived.
