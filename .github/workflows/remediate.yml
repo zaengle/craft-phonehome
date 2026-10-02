@@ -103,7 +103,7 @@ jobs:
       runner_ref: ${{ steps.run.outputs.runner_ref }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Check whether this branch and its pull request already exist
         id: branch
@@ -171,9 +171,9 @@ jobs:
       count: ${{ steps.resolve.outputs.count }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
         with:
           php-version: ${{ inputs.php_version }}
 
@@ -238,10 +238,10 @@ jobs:
       run_url: ${{ steps.deploy.outputs.run_url }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Check out the runner
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zaengle/craft-phonehome
           ref: ${{ needs.check.outputs.runner_ref }}
@@ -285,12 +285,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # The body is composed by a script in the runner (ci/pr-body.sh) with its own tests, so the
       # sentences a reviewer reads were exercised before any job ran them.
       - name: Check out the runner
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: zaengle/craft-phonehome
           ref: ${{ needs.check.outputs.runner_ref }}

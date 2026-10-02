@@ -114,3 +114,20 @@ test('the nested verification workflow names a ref that exists', () => {
     expect(remediate).not.toContain('site-verification.yml@main');
     expect(remediate.match(/site-verification\.yml@feature\/verification-manifest-poc/g)?.length ?? 0).toBe(2);
 });
+
+test('every third-party action is pinned to a full commit SHA', () => {
+    // The organization requires it, and a tag can be moved under a workflow; a SHA cannot. The
+    // repository's own reusable workflows are referenced by ref and are exempt from that policy.
+    const files = ['remediate.yml', 'site-verification.yml', 'tests.yml'].map((name) => readFileSync(`${workflows}${name}`, 'utf8'));
+    const examples = readFileSync(new URL('../../examples/deploy-staging.yml', import.meta.url).pathname, 'utf8');
+
+    for (const text of [...files, examples]) {
+        for (const match of text.matchAll(/^\s+(?:- )?uses: (\S+)/gm)) {
+            const ref = match[1];
+            if (ref.startsWith('zaengle/craft-phonehome/') || ref.startsWith('./') || ref.startsWith('docker://')) {
+                continue;
+            }
+            expect(ref, `${ref} is not pinned to a commit SHA`).toMatch(/@[0-9a-f]{40}$/);
+        }
+    }
+});
