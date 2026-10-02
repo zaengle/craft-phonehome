@@ -126,7 +126,9 @@ export function runConfig(): RunConfig {
     cached = {
         mode,
         origin,
-        apiOrigin: (process.env.PHV_API_ORIGIN ?? origin).replace(/\/+$/, ''),
+        // A workflow passes this input through even when the caller left it empty, so an empty
+        // string means "same as the site", not "the empty origin".
+        apiOrigin: (process.env.PHV_API_ORIGIN || origin).replace(/\/+$/, ''),
         token: required('PHV_TOKEN'),
         runId,
         insecureTls: process.env.PHV_INSECURE_TLS === '1',
