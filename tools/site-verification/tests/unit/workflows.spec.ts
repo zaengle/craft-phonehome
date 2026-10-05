@@ -74,6 +74,19 @@ test('a branch left by a failed run is picked up rather than declined', () => {
     expect(job('pull_request')).toContain("needs.check.outputs.has_pr == '0'");
 });
 
+test('a branch whose pull request already merged or closed is recreated rather than reused', () => {
+    // The pilot hit this: the branch from a merged pull request was never deleted, the next dispatch
+    // picked it up as a run to resume, and GitHub refused a pull request with no commits between it
+    // and main. Only a branch with no finished pull request behind it is resumed.
+    const check = job('check');
+
+    expect(check).toContain("gh pr list --head \"${{ inputs.branch }}\" --state closed");
+    expect(check).toContain('git push origin --delete "${{ inputs.branch }}"');
+    expect(check).toContain('existing=0');
+    // The open check still comes first, so a branch with an open pull request is left alone.
+    expect(check.indexOf('--state open')).toBeLessThan(check.indexOf('--state closed'));
+});
+
 test('the wrapper publishes the outcome for callers rather than leaving them a job status', () => {
     for (const output of ['overall', 'summary', 'environment']) {
         expect(verification).toContain(`value: \${{ jobs.verify.outputs.${output} }}`);

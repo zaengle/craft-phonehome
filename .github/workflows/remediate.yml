@@ -105,24 +105,38 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # A branch left by a run that failed before opening its pull request is picked up, not
+      # declined: the change on it is still the change that was asked for. A branch whose pull
+      # request has already been merged or closed is a different thing. Its change is in the
+      # default branch already, or was rejected, and GitHub refuses a pull request with no commits
+      # between the two, so the next dispatch for the same patch and site would fail on it. That
+      # branch is deleted here and prepared again from the current default branch.
       - name: Check whether this branch and its pull request already exist
         id: branch
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          existing=0
           if git ls-remote --exit-code --heads origin "${{ inputs.branch }}" >/dev/null 2>&1; then
-            echo "existing=1" >> "$GITHUB_OUTPUT"
-          else
-            echo "existing=0" >> "$GITHUB_OUTPUT"
+            existing=1
           fi
 
-          count="$(gh pr list --head "${{ inputs.branch }}" --state open --json number --jq 'length')"
-          if [ "${count:-0}" -gt 0 ]; then
+          open="$(gh pr list --head "${{ inputs.branch }}" --state open --json number --jq 'length')"
+          if [ "${open:-0}" -gt 0 ]; then
             echo "::notice::A pull request for ${{ inputs.branch }} is already open; nothing to prepare."
             echo "has_pr=1" >> "$GITHUB_OUTPUT"
           else
             echo "has_pr=0" >> "$GITHUB_OUTPUT"
+
+            finished="$(gh pr list --head "${{ inputs.branch }}" --state closed --json number --jq 'length')"
+            if [ "$existing" = "1" ] && [ "${finished:-0}" -gt 0 ]; then
+              echo "::notice::${{ inputs.branch }} is left over from a pull request that was already merged or closed; deleting it and preparing afresh."
+              git push origin --delete "${{ inputs.branch }}"
+              existing=0
+            fi
           fi
+
+          echo "existing=$existing" >> "$GITHUB_OUTPUT"
 
       # The one run id both halves of the verification share, minted once so the two cannot drift.
       # `github.run_id` makes it new for every dispatch and `github.run_attempt` for every re-run
