@@ -215,6 +215,8 @@ jobs:
     outputs:
       moved: ${{ steps.resolve.outputs.moved }}
       count: ${{ steps.resolve.outputs.count }}
+      scope: ${{ steps.resolve.outputs.scope }}
+      scope_reason: ${{ steps.resolve.outputs.scope_reason }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -394,6 +396,8 @@ jobs:
           CONTEXT: ${{ steps.context.outputs.json }}
           MOVED: ${{ needs.prepare.outputs.moved }}
           COUNT: ${{ needs.prepare.outputs.count }}
+          SCOPE: ${{ needs.prepare.outputs.scope }}
+          SCOPE_REASON: ${{ needs.prepare.outputs.scope_reason }}
           BASELINE: ${{ needs.baseline.outputs.overall }}
           BASELINE_SUMMARY: ${{ needs.baseline.outputs.summary }}
           DEPLOYED: ${{ needs.deploy.outputs.deployed }}
