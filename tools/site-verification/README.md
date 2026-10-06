@@ -113,6 +113,12 @@ The remediation workflow starts it, waits on it, and only compares when it succe
 names no deploy workflow is dispatched with no environment at all; the branch is pushed and the
 pull request opened, marked as not verified, and that is the whole of what it gets.
 
+A site that keeps its Craft application in a subdirectory rather than at the repository root sets
+`working_directory` on its `remediate.yml` caller, for example to `src`. Every Composer step, the
+lock file read and the commit of the lock file then run there, and the comparison waits for the
+lock file found there. The same site sets `lock_path` to `src/composer.lock` on the `verify` job
+of its `verify-on-deploy.yml`, which is the only file a comparison reads from the repository.
+
 Three things decide whether a pair is comparable, and all three are enforced rather than assumed:
 
 - **The browser and platform.** A baseline records its Playwright version, Chromium version,

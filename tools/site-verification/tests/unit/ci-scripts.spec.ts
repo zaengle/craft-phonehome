@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -440,5 +440,70 @@ test.describe('summarise.mjs', () => {
         });
 
         expect(outputs.split('\n').filter((line) => line.startsWith('summary=')).length).toBe(1);
+    });
+});
+
+/**
+ * A site whose Craft application lives in `src/`, with a stand-in `composer` on PATH that moves
+ * one package in the lock file it finds in the directory it is run from, as the real one would.
+ */
+function siteInSubdirectory(): { root: string; app: string; bin: string } {
+    // Resolved, because the temporary directory is reached through a symlink on macOS and the
+    // stand-in reports the real path it ran in.
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'phv-site-')));
+    const app = join(root, 'src');
+    const bin = join(root, 'bin');
+
+    spawnSync('mkdir', ['-p', app, bin]);
+    writeFileSync(join(app, 'composer.json'), '{"require":{"craftcms/cms":"^5.8"}}');
+    writeFileSync(
+        join(app, 'composer.lock'),
+        JSON.stringify({ packages: [{ name: 'craftcms/cms', version: '5.8.14' }, { name: 'yiisoft/yii2', version: '2.0.52' }] }),
+    );
+    writeFileSync(
+        join(bin, 'composer'),
+        `#!/usr/bin/env bash
+echo "composer $* in $(pwd)" >&2
+php -r '$l = json_decode(file_get_contents("composer.lock"), true); $l["packages"][0]["version"] = "5.8.15"; file_put_contents("composer.lock", json_encode($l));'`,
+    );
+    spawnSync('chmod', ['+x', join(bin, 'composer')]);
+
+    return { root, app, bin };
+}
+
+function resolveChange(cwd: string, bin: string) {
+    const outputs = join(mkdtempSync(join(tmpdir(), 'phv-resolve-')), 'outputs');
+    writeFileSync(outputs, '');
+
+    const run = spawnSync('bash', [join(ci, 'resolve-change.sh')], {
+        cwd,
+        env: { PATH: `${bin}:${process.env.PATH ?? ''}`, GITHUB_OUTPUT: outputs, PACKAGE: 'craftcms/cms', VERSION: '5.8.15' },
+        encoding: 'utf8',
+    });
+
+    return { status: run.status, stdout: run.stdout, stderr: run.stderr, outputs: readFileSync(outputs, 'utf8') };
+}
+
+test.describe('resolve-change.sh', () => {
+    test('moves the package in the lock file of the directory it is run from, and reports what moved', () => {
+        const site = siteInSubdirectory();
+        const result = resolveChange(site.app, site.bin);
+
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.stderr).toContain(`composer update craftcms/cms:5.8.15 --with-all-dependencies --no-interaction --no-scripts in ${site.app}`);
+        expect(result.outputs).toBe('count=1\nmoved<<MOVED\ncraftcms/cms 5.8.14 -> 5.8.15\nMOVED\n');
+        // Nothing is written at the repository root, and the working copy of the lock is cleaned up.
+        expect(existsSync(join(site.root, 'composer.lock'))).toBe(false);
+        expect(existsSync(join(site.app, 'composer.lock.before'))).toBe(false);
+    });
+
+    test('run from a root with no Composer files, it names working_directory rather than inventing a lock file', () => {
+        const site = siteInSubdirectory();
+        const result = resolveChange(site.root, site.bin);
+
+        expect(result.status).toBe(1);
+        expect(result.stdout).toContain('set working_directory to it in the calling workflow');
+        expect(result.stderr).not.toContain('composer update');
+        expect(existsSync(join(site.root, 'composer.lock'))).toBe(false);
     });
 });

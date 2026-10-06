@@ -61,6 +61,9 @@ jobs:
       dashboard_origin: ${{ inputs.dashboard_origin }}
       deploy_workflow: ${{ inputs.deploy_workflow }}
       php_version: '8.3'
+      # Where composer.json and composer.lock live. Change it to the subdirectory, such as 'src',
+      # when this site keeps its Craft application there rather than at the repository root.
+      working_directory: '.'
     secrets:
       composer_auth: ${{ secrets.COMPOSER_AUTH }}
       basic_auth_user: ${{ secrets.STAGING_BASIC_AUTH_USER }}

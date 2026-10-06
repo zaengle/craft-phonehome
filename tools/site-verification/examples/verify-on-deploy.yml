@@ -97,6 +97,10 @@ jobs:
     uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@1.8.1 # the same tag as `baseline`
     with:
       mode: compare
+      # The lock file the comparison waits for the environment to report. Change it to
+      # 'src/composer.lock', or wherever it lives, when this site keeps its Craft application in a
+      # subdirectory rather than at the repository root.
+      lock_path: composer.lock
       run_id: ${{ needs.pair.outputs.run_id }}
       origin: https://staging.example.com
       dashboard_origin: https://phone-home.example.com

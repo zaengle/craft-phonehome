@@ -58,6 +58,15 @@ on:
         type: string
         default: ''
       php_version: { required: false, type: string, default: '8.3' }
+      working_directory:
+        description: >-
+          Where the site's composer.json and composer.lock live, relative to the repository root.
+          The default is the root; a site that keeps its Craft application in a subdirectory, such
+          as `src`, names it here. Every Composer step, the lock file read and the commit of the
+          lock file run inside it, and the comparison waits for the lock file found there.
+        required: false
+        type: string
+        default: '.'
       runner_ref:
         description: >-
           Which commit of the runner to use. Empty means the commit this workflow file was read
@@ -102,6 +111,7 @@ jobs:
       existing: ${{ steps.branch.outputs.existing }}
       has_pr: ${{ steps.branch.outputs.has_pr }}
       runner_ref: ${{ steps.run.outputs.runner_ref }}
+      lock_path: ${{ steps.lock.outputs.lock_path }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -154,6 +164,22 @@ jobs:
           RUNNER_REF: ${{ inputs.runner_ref || job.workflow_sha }}
         run: echo "runner_ref=$RUNNER_REF" >> "$GITHUB_OUTPUT"
 
+      # The lock file's path from the repository root, for the comparison's checkout of it. Spelled
+      # without a leading `./` or a trailing slash, because the checkout matches it as a pattern and
+      # `./composer.lock` or `src//composer.lock` would match nothing.
+      - name: Locate the lock file
+        id: lock
+        env:
+          WORKING_DIRECTORY: ${{ inputs.working_directory }}
+        run: |
+          dir="${WORKING_DIRECTORY#./}"
+          dir="${dir%/}"
+          if [ -z "$dir" ] || [ "$dir" = "." ]; then
+            echo "lock_path=composer.lock" >> "$GITHUB_OUTPUT"
+          else
+            echo "lock_path=${dir}/composer.lock" >> "$GITHUB_OUTPUT"
+          fi
+
   # Freezes the verification environment before anything touches it.
   #
   # The run id is built here and in `verify` from the same three values, rather than passed out of
@@ -197,8 +223,19 @@ jobs:
         with:
           php-version: ${{ inputs.php_version }}
 
+      # The script is in the runner (ci/resolve-change.sh) so it can be tested against a stand-in
+      # Composer. It runs inside `working_directory`, where the site's composer.json and lock file
+      # are, which is the repository root unless the site says otherwise.
+      - name: Check out the runner
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zaengle/craft-phonehome
+          ref: ${{ needs.check.outputs.runner_ref }}
+          path: .phonehome-runner
+
       - name: Resolve the change
         id: resolve
+        working-directory: ${{ inputs.working_directory }}
         env:
           COMPOSER_AUTH: ${{ secrets.composer_auth }}
           BRANCH: ${{ inputs.branch }}
@@ -206,37 +243,10 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           git switch -c "$BRANCH"
-          cp composer.lock composer.lock.before
-
-          # --with-all-dependencies, because a Craft plugin security release frequently cannot move
-          # without craftcms/cms moving with it, and craftcms/cms is a root requirement, which
-          # --with-dependencies alone would refuse to touch. The requested version still has to fit
-          # the root constraint; when it does not, this fails here, before anything is pushed, and
-          # the constraint is the thing a person has to change. What moves is reported rather than
-          # assumed to be small.
-          composer update "$PACKAGE:$VERSION" --with-all-dependencies --no-interaction --no-scripts
-
-          # shellcheck disable=SC2016
-          moved="$(php -r '
-            $read = fn(string $f): array => array_column(json_decode(file_get_contents($f), true)["packages"] ?? [], "version", "name");
-            $before = $read("composer.lock.before");
-            $after = $read("composer.lock");
-            $changed = [];
-            foreach ($after as $name => $version) {
-              if (($before[$name] ?? null) !== $version) { $changed[] = $name . " " . ($before[$name] ?? "new") . " -> " . $version; }
-            }
-            echo implode("\n", $changed);
-          ')"
-
-          rm composer.lock.before
-          echo "count=$(printf '%s' "$moved" | grep -c . || true)" >> "$GITHUB_OUTPUT"
-          {
-            echo 'moved<<MOVED'
-            printf '%s\n' "$moved"
-            echo 'MOVED'
-          } >> "$GITHUB_OUTPUT"
+          bash "$GITHUB_WORKSPACE/.phonehome-runner/tools/site-verification/ci/resolve-change.sh"
 
       - name: Push the branch
+        working-directory: ${{ inputs.working_directory }}
         env:
           BRANCH: ${{ inputs.branch }}
           PACKAGE: ${{ inputs.package }}
@@ -303,6 +313,7 @@ jobs:
       # The branch, not the commit that started this workflow: that is the default branch, which
       # does not hold the change being verified.
       lock_ref: ${{ inputs.branch }}
+      lock_path: ${{ needs.check.outputs.lock_path }}
     secrets:
       phonehome_token: ${{ secrets.phonehome_token }}
       basic_auth_user: ${{ secrets.basic_auth_user }}
