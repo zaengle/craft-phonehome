@@ -1,7 +1,62 @@
 # Release Notes for Craft Phone Home Plugin
 
+## [1.7.0] - 2026-09-23
+
+- Promote develop to main for 1.7.0 [`#30`](https://github.com/zaengle/craft-phonehome/pull/30)
+- fixed: locate package.json instead of assuming it sits at @root [`#29`](https://github.com/zaengle/craft-phonehome/pull/29)
+- fixed: stage the changelog when bumping the version [`0f59563`](https://github.com/zaengle/craft-phonehome/commit/0f595633fb73c4b06d28556c287fb52e5a651978)
+
+## [1.6.0] - 2026-09-23
+
+- Promote develop to main to bring CI onto main [`#28`](https://github.com/zaengle/craft-phonehome/pull/28)
+- added: run tests and static analysis on pull requests [`#26`](https://github.com/zaengle/craft-phonehome/pull/26)
+- Promote develop to main for 1.6.0 [`#27`](https://github.com/zaengle/craft-phonehome/pull/27)
+- added: npm package reporting to API response [`#25`](https://github.com/zaengle/craft-phonehome/pull/25)
+- added: unit tests for npm package reporting [`d62ad87`](https://github.com/zaengle/craft-phonehome/commit/d62ad879e5ae37d10cc53f2dc3d56a625941f4d8)
+- fixed: report an explicit collection status for the npm section [`61c7f82`](https://github.com/zaengle/craft-phonehome/commit/61c7f824ee2574338901c9285e1391c3f8f4481d)
+- fixed: review findings on npm package reporting [`93197f3`](https://github.com/zaengle/craft-phonehome/commit/93197f353eca19923b2973c1ed6dae765a2d2bc3)
+- fixed: keep a mapping failure from taking down the whole report [`ca035c9`](https://github.com/zaengle/craft-phonehome/commit/ca035c97f507eef82be209b15ce7b641624e5158)
+- added: run tests, static analysis and coding standards on pull requests [`9e4a36d`](https://github.com/zaengle/craft-phonehome/commit/9e4a36dea1ee1e2f2168579eb468785748020a60)
+- fixed: do not report a post-manifest failure as a manifest problem [`084cee2`](https://github.com/zaengle/craft-phonehome/commit/084cee266ad0177b030fb46e040775f996354ba2)
+- fixed: apply credential strip to resolved versions [`16fd411`](https://github.com/zaengle/craft-phonehome/commit/16fd4117a1eb66a268233cb31be8606d512bfc90)
+- Release 1.6.0 [`9bec8d5`](https://github.com/zaengle/craft-phonehome/commit/9bec8d5705f4e991385f8504afd9dd132f7c7209)
+- fixed: pin workflow actions to full commit SHAs [`b47c31c`](https://github.com/zaengle/craft-phonehome/commit/b47c31c408d9894e3be06e3a40b49192316c1634)
+- fixed: document that a null package_manager can also mean detection failed [`1d6c656`](https://github.com/zaengle/craft-phonehome/commit/1d6c65633b46ad3283585639b4a08de0504a9fdd)
+- fixed: drop PHP 8.2 from the test matrix [`e58d63d`](https://github.com/zaengle/craft-phonehome/commit/e58d63d749c066f92b433a273fc00bbce992348a)
+- fixed: strip credentials past an @ in an npm URL password [`ed4419a`](https://github.com/zaengle/craft-phonehome/commit/ed4419a73da49d4ce918f314c989e5dd9c6ad0e2)
+- fixed: complete the phpstan config fix [`b88c102`](https://github.com/zaengle/craft-phonehome/commit/b88c1020a8be48b76f4ddcef1dceab535267d09f)
+- fixed: make the phpstan config load [`8cb8d6b`](https://github.com/zaengle/craft-phonehome/commit/8cb8d6bd274ed2c1abd87dfe7ef63040f9000d01)
+
+## [1.5.0] - 2026-08-20
+
+- Score pending queue jobs against configurable thresholds [`#24`](https://github.com/zaengle/craft-phonehome/pull/24)
+- added: score pending queue jobs against configurable thresholds [`6af2e09`](https://github.com/zaengle/craft-phonehome/commit/6af2e096274feaa1f3638f730f5cbe6b7434108e)
+- fixed: review findings on queue status check [`b79925c`](https://github.com/zaengle/craft-phonehome/commit/b79925ca1c6dfe8897cf1debdc5da4479cb7aedd)
+- Release 1.5.0 [`b9e6eb9`](https://github.com/zaengle/craft-phonehome/commit/b9e6eb9d64dd22f971931fa48d749d0b7f0770ca)
+- changed: lower pending job thresholds to 20/50 [`75a31bc`](https://github.com/zaengle/craft-phonehome/commit/75a31bc1a344c9e18a5857d21b7cab495b925fe0)
+- Revise security policy and reporting guidelines [`ae8b9c9`](https://github.com/zaengle/craft-phonehome/commit/ae8b9c9abc325f5a2cfb32c63ff9c1bee16dfa6e)
+- Add permissions for contents in deploy-docs workflow [`f1b2048`](https://github.com/zaengle/craft-phonehome/commit/f1b204831a25994186b3f75003038183a77204ee)
+- Add permissions to create-release workflow [`763e2c0`](https://github.com/zaengle/craft-phonehome/commit/763e2c04709f1dc0cc7849d8702e29cb7386d8da)
+
+## [1.4.0] - 2026-01-05
+
+- added: configurable status checks [`3d53e61`](https://github.com/zaengle/craft-phonehome/commit/3d53e6174688dd5c8b157c12e96c81d471d9f789)
+- improved: add check for delayed jobs, add queue threshold settings to plugin settings template [`f410fda`](https://github.com/zaengle/craft-phonehome/commit/f410fda8a94815dd9907576d3e43df830b44f36f)
+- added: claude init file [`300d66c`](https://github.com/zaengle/craft-phonehome/commit/300d66ca08b5c00b2d70eb70b7ab82ea8da2864a)
+- chore: self-review fixes [`038e2b3`](https://github.com/zaengle/craft-phonehome/commit/038e2b3a95801e7e1059597c54c04304a8037065)
+- added: check descriptions + threshold info in meta in queue check [`0c128ec`](https://github.com/zaengle/craft-phonehome/commit/0c128eceb7ab46eedef3a7ae172102aa9941dbfa)
+- added: missing events dir [`79c1596`](https://github.com/zaengle/craft-phonehome/commit/79c1596f46bcbc53794864a44474bb81677016f1)
+- fixed: error on date formatting of plugin updates [`36714d9`](https://github.com/zaengle/craft-phonehome/commit/36714d9f793527e415fc24dd965721dc7acc093e)
+
+## [1.3.0] - 2026-01-05
+
+- chore: composer update [`42ee211`](https://github.com/zaengle/craft-phonehome/commit/42ee2117aede97a8072bfc04db7bc7c78ecc1c05)
+- chore: npm update [`007b84b`](https://github.com/zaengle/craft-phonehome/commit/007b84bc93207f5d525fa87251a378b37bded3a6)
+- chore: update GH actions deps [`f67a703`](https://github.com/zaengle/craft-phonehome/commit/f67a70309eb299db71f1d8639ba0e497f1c7c285)
+
 ## [1.2.4] - 2025-08-21
 
+- 1.2.4 release [`6857cee`](https://github.com/zaengle/craft-phonehome/commit/6857cee07c3d9e723f9600782764eef0c7b228ec)
 - fixed: error on date formatting of plugin updates [`096e9ca`](https://github.com/zaengle/craft-phonehome/commit/096e9ca66e7ade18fc3848ff1f8f067942808a51)
 
 ## [1.2.3] - 2025-08-14
@@ -63,6 +118,11 @@
 
 - Initial commit [`490a6d0`](https://github.com/zaengle/craft-phonehome/commit/490a6d0b08758d148f64d2c90720a057d590316b)
 
+[1.7.0]: https://github.com/zaengle/craft-phonehome/compare/1.6.0...1.7.0
+[1.6.0]: https://github.com/zaengle/craft-phonehome/compare/1.5.0...1.6.0
+[1.5.0]: https://github.com/zaengle/craft-phonehome/compare/1.4.0...1.5.0
+[1.4.0]: https://github.com/zaengle/craft-phonehome/compare/1.3.0...1.4.0
+[1.3.0]: https://github.com/zaengle/craft-phonehome/compare/1.2.4...1.3.0
 [1.2.4]: https://github.com/zaengle/craft-phonehome/compare/1.2.3...1.2.4
 [1.2.3]: https://github.com/zaengle/craft-phonehome/compare/1.2.2...1.2.3
 [1.2.2]: https://github.com/zaengle/craft-phonehome/compare/1.2.1...1.2.2
