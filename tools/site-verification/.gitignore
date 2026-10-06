@@ -1,0 +1,4 @@
+node_modules/
+# Run bundles are evidence from a single trial, not source.
+runs/
+test-results/

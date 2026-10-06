@@ -1,0 +1,106 @@
+# Copy this into a site's repository as .github/workflows/verify-on-deploy.yml, then put its
+# existing deploy between the two halves.
+#
+# The shape is: freeze a baseline, deploy, compare against the frozen copy. Both halves must share
+# a run id, and it must be one this site has not used before — the commit SHA plus the run attempt
+# does both jobs, and a re-run of the pair gets a fresh identity rather than a refused baseline.
+#
+# What this needs before it will run:
+#
+#   * Nothing secret from Phone Home. With `id-token: write` below, each job proves it is a run of
+#     this repository and Phone Home hands it the linked site's token. A repository Phone Home
+#     has not linked can set a PHONEHOME_TOKEN secret instead and pass it as phonehome_token.
+#   * Secrets STAGING_BASIC_AUTH_USER / _PASSWORD — only if the environment sits behind an auth
+#     prompt, which staging commonly does. Without them the runner photographs the prompt and
+#     reports a missing required element on every page.
+#   * The site's plugin configured with a `verification` block, and reporting api_version 1.5.0 or
+#     later. A site that has not opted in is reported as disabled, not as an empty passing suite.
+#
+# The comparison waits for the environment, not for the push. Before it captures the after side,
+# the shared workflow polls the site until it reports the Craft and plugin versions recorded in the
+# composer.lock of the commit that started this run, and ends inconclusive, naming the versions it
+# was waiting for, if that has not happened within `deploy_timeout` seconds (900 by default). That
+# holds however this workflow is started, and it is what keeps a host that deploys on its own, as
+# Forge does when it watches a branch, from having the old code compared and the verdict attached
+# to the change. It can only see what the plugin reports, so a push that moves no Craft or plugin
+# version satisfies it at once.
+#
+# Where this site's deploy can be started from GitHub, start the pair from the deploy rather than
+# from the push, so the wait is a formality rather than the only safeguard:
+#
+#   * Put the deploy in the `deploy` job below, between the two halves. The baseline is then
+#     captured before the deploy starts, and the comparison follows it.
+#   * Or, where the host records GitHub deployments, trigger on `deployment_status` instead of
+#     `push`, capturing when the deployment reports `in_progress` and comparing when it reports
+#     `success`, with `deploy-${{ github.event.deployment.id }}` as the shared run id. The two
+#     halves are then separate runs, held apart by the concurrency group below. `github.sha` is the
+#     deployment's commit on that event, so the comparison waits for the right lock file without
+#     being told; a caller started any other way passes the deployed commit as `lock_ref`.
+#
+# A pair started only after the deploy has finished has no before side, so whichever shape is used,
+# the baseline has to be captured before the deploy begins.
+name: Verify on deploy
+
+# What lets a job prove its identity to Phone Home in place of a stored secret.
+permissions:
+  contents: read
+  id-token: write
+
+# The push, because the placeholder deploy below runs inside this workflow. A site whose host
+# deploys on its own still gets a comparison of the deployed commit; see the note above.
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  # A second deploy starting mid-pair would compare the new baseline against the old site. The
+  # pair is only meaningful uninterrupted, so the group is the environment, named the same way in
+  # remediate.yml, rather than the branch.
+  group: verify-https://STAGING_ORIGIN_TO_FILL_IN
+  cancel-in-progress: false
+
+jobs:
+  # The pair's shared identity, minted once. Re-running only the failed jobs of a run keeps this
+  # job's output, so a comparison re-run after a failed deploy still finds the baseline the first
+  # attempt captured; computing it in each job would give the re-run a new attempt number and no
+  # baseline to compare against.
+  pair:
+    runs-on: ubuntu-latest
+    outputs:
+      run_id: ${{ github.sha }}-${{ github.run_attempt }}
+    steps:
+      - run: echo "run id ${{ github.sha }}-${{ github.run_attempt }}"
+
+  baseline:
+    needs: pair
+    # Replace RELEASE_TAG_TO_FILL_IN here and in `verify` with the plugin release tag this site
+    # should run, 1.8.0 or later; 1.8.0 is the first release that carries these workflows. A tag,
+    # never a branch: the runner follows this file's commit, so this is the one thing to pin.
+    uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@RELEASE_TAG_TO_FILL_IN
+    with:
+      mode: capture
+      run_id: ${{ needs.pair.outputs.run_id }}
+      origin: https://staging.example.com
+      dashboard_origin: https://phone-home.example.com
+    secrets:
+      basic_auth_user: ${{ secrets.STAGING_BASIC_AUTH_USER }}
+      basic_auth_password: ${{ secrets.STAGING_BASIC_AUTH_PASSWORD }}
+
+  deploy:
+    needs: baseline
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy
+        run: echo "Whatever this site already does — Envoyer, rsync, a deploy hook."
+
+  verify:
+    needs: [pair, deploy]
+    uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@RELEASE_TAG_TO_FILL_IN # the same tag as `baseline`
+    with:
+      mode: compare
+      run_id: ${{ needs.pair.outputs.run_id }}
+      origin: https://staging.example.com
+      dashboard_origin: https://phone-home.example.com
+    secrets:
+      basic_auth_user: ${{ secrets.STAGING_BASIC_AUTH_USER }}
+      basic_auth_password: ${{ secrets.STAGING_BASIC_AUTH_PASSWORD }}

@@ -1,0 +1,67 @@
+# Copy this into a site's repository as .github/workflows/remediate.yml. Phone Home dispatches it
+# when somebody asks for a security patch to be prepared for this site; nothing else triggers it.
+#
+# It does nothing itself. Every step lives in the shared workflow it calls, so a fix to the
+# process reaches every site by moving the release tag rather than by editing each repository.
+#
+# What this needs before it will run:
+#
+#   * Nothing secret from Phone Home. With `id-token: write` below, each job proves it is a run of
+#     this repository and Phone Home hands it the linked site's token.
+#   * Secret COMPOSER_AUTH — only if the site resolves commercial Craft plugins.
+#   * Secrets STAGING_BASIC_AUTH_USER / _PASSWORD — only if staging sits behind an auth prompt.
+#   * A workflow_dispatch workflow that deploys a ref to staging (see deploy-staging.yml), named in
+#     Phone Home as this site's deploy workflow. Without one Phone Home refuses to dispatch at all.
+#   * The Phone Home GitHub App installed on this repository with `actions: write`.
+name: Prepare security remediation
+
+on:
+  workflow_dispatch:
+    inputs:
+      patch_id: { required: true, type: string }
+      site_id: { required: true, type: string }
+      branch: { required: true, type: string }
+      package: { required: true, type: string }
+      version: { required: true, type: string }
+      # Empty when the site has no environment to verify on; the pull request is then opened
+      # unverified and says so.
+      verify_origin: { required: false, type: string, default: '' }
+      dashboard_origin: { required: true, type: string }
+      deploy_workflow: { required: false, type: string, default: '' }
+
+# The shared workflow can hold no more than this grants. `actions: write` is what lets it start
+# this repository's own deploy workflow and wait for it; `id-token: write` is what lets it prove
+# its identity to Phone Home in place of a stored secret.
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+  id-token: write
+
+concurrency:
+  # One verification pair at a time per environment. The group is named the same way in
+  # verify-on-deploy.yml, so a remediation and a deploy of main cannot capture, deploy and compare
+  # over each other on the same environment.
+  group: verify-${{ inputs.verify_origin || 'unverified' }}
+  cancel-in-progress: false
+
+jobs:
+  remediate:
+    # Replace RELEASE_TAG_TO_FILL_IN with the plugin release tag this site should run, 1.8.0 or
+    # later; 1.8.0 is the first release that carries these workflows. A tag, never a branch: the
+    # runner follows this file's commit, so this is the one thing to pin.
+    uses: zaengle/craft-phonehome/.github/workflows/remediate.yml@RELEASE_TAG_TO_FILL_IN
+    with:
+      patch_id: ${{ inputs.patch_id }}
+      site_id: ${{ inputs.site_id }}
+      branch: ${{ inputs.branch }}
+      package: ${{ inputs.package }}
+      version: ${{ inputs.version }}
+      verify_origin: ${{ inputs.verify_origin }}
+      dashboard_origin: ${{ inputs.dashboard_origin }}
+      deploy_workflow: ${{ inputs.deploy_workflow }}
+      php_version: '8.3'
+    secrets:
+      composer_auth: ${{ secrets.COMPOSER_AUTH }}
+      basic_auth_user: ${{ secrets.STAGING_BASIC_AUTH_USER }}
+      basic_auth_password: ${{ secrets.STAGING_BASIC_AUTH_PASSWORD }}

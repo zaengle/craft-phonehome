@@ -1,0 +1,15 @@
+{
+  "name": "@zaengle/site-verification",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Captures and compares a Phone Home site's verification manifest around a change",
+  "scripts": {
+    "capture": "playwright test",
+    "compare": "CI=1 PHV_MODE=compare playwright test",
+    "install-browser": "playwright install --with-deps chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.49.1"
+  }
+}
