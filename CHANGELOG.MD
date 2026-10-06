@@ -1,5 +1,14 @@
 # Release Notes for Craft Phone Home Plugin
 
+## [1.8.2] - Unreleased
+
+This release changes how the shared remediation workflow updates Composer. The plugin itself and its API are unchanged, so the API schema stays at 1.5.0.
+
+- A remediation now moves as little as the security release requires. The workflow tries the requested package alone first, then lets its own dependencies move, and lets root requirements such as Craft move only when neither narrower update can be resolved, each time with Composer's `--minimal-changes`. Before this, every update moved every dependency, which turned one plugin release into a 48-package pull request on the first real site.
+- The remediation pull request says how far the update had to reach and quotes the conflict that made it widen, so a reviewer can tell what the release required from what moved alongside it.
+- A Composer failure that is not a dependency conflict, such as a missing credential, now stops the update at once rather than being retried more broadly.
+- The example callers now reference the `1.8.2` tag. A site keeps the old behaviour until its own `remediate.yml` names this tag or a later one.
+
 ## [1.8.1] - 2026-10-06
 
 This release changes the shared remediation workflows and the example files a site copies. The plugin itself and its API are unchanged, so the API schema stays at 1.5.0.

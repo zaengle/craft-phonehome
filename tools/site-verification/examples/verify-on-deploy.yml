@@ -75,7 +75,7 @@ jobs:
     needs: pair
     # A release tag, never a branch: the runner follows this file's commit, so this is the one thing
     # to pin. Use the same tag here and in `verify`, and the same one the site's remediate.yml uses.
-    uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@1.8.1
+    uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@1.8.2
     with:
       mode: capture
       run_id: ${{ needs.pair.outputs.run_id }}
@@ -94,7 +94,7 @@ jobs:
 
   verify:
     needs: [pair, deploy]
-    uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@1.8.1 # the same tag as `baseline`
+    uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@1.8.2 # the same tag as `baseline`
     with:
       mode: compare
       # The lock file the comparison waits for the environment to report. Change it to
