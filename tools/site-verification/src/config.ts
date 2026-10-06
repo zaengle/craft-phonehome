@@ -1,3 +1,5 @@
+import { resolve } from 'node:path';
+
 /**
  * Run configuration, read once from the environment.
  *
@@ -71,6 +73,18 @@ export interface RunConfig {
      */
     expectPackage: string | null;
     expectVersion: string | null;
+    /**
+     * For a comparison: the `composer.lock` of the commit the environment should now be running.
+     * When set, the after side is not captured until the environment reports the versions it
+     * records, and a comparison that times out waiting is inconclusive. Unset means no wait, which
+     * is right only where something else has already established the deploy finished.
+     */
+    expectLock: string | null;
+    /** What `expectLock` was read from, for the sentence that explains a wait that timed out. */
+    expectLockRef: string | null;
+    /** How long to wait for the environment to report `expectLock`, and how often to ask. */
+    deployTimeoutMs: number;
+    deployIntervalMs: number;
 }
 
 function required(name: string): string {
@@ -148,6 +162,12 @@ export function runConfig(): RunConfig {
         expectChange: process.env.PHV_EXPECT_CHANGE === '1',
         expectPackage: process.env.PHV_EXPECT_PACKAGE?.trim() || null,
         expectVersion: process.env.PHV_EXPECT_VERSION?.trim() || null,
+        // Resolved once against the directory the run started in, so a relative path names the
+        // same file in every worker.
+        expectLock: process.env.PHV_EXPECT_LOCK?.trim() ? resolve(process.env.PHV_EXPECT_LOCK.trim()) : null,
+        expectLockRef: process.env.PHV_EXPECT_LOCK_REF?.trim() || null,
+        deployTimeoutMs: Math.max(0, Number(process.env.PHV_DEPLOY_TIMEOUT ?? 900)) * 1000,
+        deployIntervalMs: Math.max(1, Number(process.env.PHV_DEPLOY_INTERVAL ?? 15)) * 1000,
         // Resolved here rather than at each use. Two callers each defaulting to Date.now() disagree
         // by a millisecond and quietly write one run's evidence into two directories.
         attemptId: attemptId(mode),

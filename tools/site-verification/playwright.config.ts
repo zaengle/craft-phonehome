@@ -21,6 +21,7 @@ import {
     pullBaseline,
     type CaptureRecord,
 } from './src/manifest';
+import { notDeployedAbort, readLockFile, waitForLock } from './src/deployed';
 
 /**
  * The manifest is resolved here, at config load, rather than in a globalSetup hook, because the
@@ -175,6 +176,12 @@ async function prepareCompare(): Promise<void> {
         return;
     }
 
+    // The environment has to be running the commit this comparison is about before the after side
+    // is captured. Whatever started the run, a push or a deploy, only the environment can say so.
+    if (config.expectLock !== null && !(await waitForDeploy(config.expectLock))) {
+        return;
+    }
+
     // Confirm the site is actually answering before any page result is believed. A host that has
     // gone away can still serve a router's 404 for every path, which reads as a page-by-page
     // failure when it is really an inability to verify anything at all.
@@ -205,6 +212,57 @@ async function prepareCompare(): Promise<void> {
             `Environment since capture:\n  ${environment.changed.map((entry) => `${entry.name} ${entry.before ?? 'absent'} → ${entry.after ?? 'removed'}`).join('\n  ')}\n`,
         );
     }
+}
+
+/**
+ * Polls the plugin's report until the environment reports what the lock file records.
+ *
+ * Returns false, having written the reason into the bundle, when it never does. The comparison
+ * then ends inconclusive naming the versions it waited for, never passed.
+ */
+async function waitForDeploy(lockPath: string): Promise<boolean> {
+    let lock: Record<string, string>;
+
+    try {
+        lock = readLockFile(lockPath);
+    } catch (error) {
+        abort('no_lock', [`Could not read ${lockPath}: ${(error as Error).message}`, 'Without it the runner cannot tell whether the environment is running the commit.']);
+
+        return false;
+    }
+
+    if (Object.keys(lock).length === 0) {
+        abort('no_lock', [`${lockPath} records no packages, so the runner cannot tell whether the environment is running the commit.`]);
+
+        return false;
+    }
+
+    const ref = config.expectLockRef ?? lockPath;
+
+    process.stdout.write(`Waiting up to ${Math.round(config.deployTimeoutMs / 1000)}s for ${config.origin} to report the versions in ${ref}'s composer.lock\n`);
+
+    const outcome = await waitForLock(
+        lock,
+        async () => {
+            const report = await fetchReport(config.apiOrigin, config.token, config.insecureTls);
+
+            return isAbort(report) ? `${report.reason}: ${report.detail.join(' ')}` : readPackages(report.payload);
+        },
+        { timeoutMs: config.deployTimeoutMs, intervalMs: config.deployIntervalMs },
+    );
+
+    if (outcome.deployed) {
+        process.stdout.write(`${config.origin} is running ${ref} (after ${outcome.polls} check(s))\n`);
+
+        return true;
+    }
+
+    const refusal = notDeployedAbort(outcome, config.origin, ref, config.deployTimeoutMs);
+
+    process.stdout.write(`${refusal.detail.join('\n')}\n`);
+    writeBundle(config.bundleDir, refusal);
+
+    return false;
 }
 
 function abort(reason: string, detail: string[]): void {

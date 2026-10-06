@@ -15,6 +15,30 @@
 #     reports a missing required element on every page.
 #   * The site's plugin configured with a `verification` block, and reporting api_version 1.5.0 or
 #     later. A site that has not opted in is reported as disabled, not as an empty passing suite.
+#
+# The comparison waits for the environment, not for the push. Before it captures the after side,
+# the shared workflow polls the site until it reports the Craft and plugin versions recorded in the
+# composer.lock of the commit that started this run, and ends inconclusive, naming the versions it
+# was waiting for, if that has not happened within `deploy_timeout` seconds (900 by default). That
+# holds however this workflow is started, and it is what keeps a host that deploys on its own, as
+# Forge does when it watches a branch, from having the old code compared and the verdict attached
+# to the change. It can only see what the plugin reports, so a push that moves no Craft or plugin
+# version satisfies it at once.
+#
+# Where this site's deploy can be started from GitHub, start the pair from the deploy rather than
+# from the push, so the wait is a formality rather than the only safeguard:
+#
+#   * Put the deploy in the `deploy` job below, between the two halves. The baseline is then
+#     captured before the deploy starts, and the comparison follows it.
+#   * Or, where the host records GitHub deployments, trigger on `deployment_status` instead of
+#     `push`, capturing when the deployment reports `in_progress` and comparing when it reports
+#     `success`, with `deploy-${{ github.event.deployment.id }}` as the shared run id. The two
+#     halves are then separate runs, held apart by the concurrency group below. `github.sha` is the
+#     deployment's commit on that event, so the comparison waits for the right lock file without
+#     being told; a caller started any other way passes the deployed commit as `lock_ref`.
+#
+# A pair started only after the deploy has finished has no before side, so whichever shape is used,
+# the baseline has to be captured before the deploy begins.
 name: Verify on deploy
 
 # What lets a job prove its identity to Phone Home in place of a stored secret.
@@ -22,6 +46,8 @@ permissions:
   contents: read
   id-token: write
 
+# The push, because the placeholder deploy below runs inside this workflow. A site whose host
+# deploys on its own still gets a comparison of the deployed commit; see the note above.
 on:
   push:
     branches: [main]

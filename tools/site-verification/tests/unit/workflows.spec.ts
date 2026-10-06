@@ -144,3 +144,13 @@ test('every third-party action is pinned to a full commit SHA', () => {
         }
     }
 });
+
+test('a comparison waits for the environment to be running the commit, whatever started it', () => {
+    // On the pilot the pair ran on the push to main and reported before the host had deployed it.
+    // The wait lives in the reusable workflow, so no caller can start a comparison without it.
+    expect(verification).toMatch(/if: inputs\.mode == 'compare'\n\s+uses: actions\/checkout@[0-9a-f]{40}.*\n\s+with:\n\s+ref: \$\{\{ inputs\.lock_ref \|\| github\.sha \}\}/);
+    expect(verification).toContain("PHV_EXPECT_LOCK: ${{ inputs.mode == 'compare' && format('../../../site/{0}', inputs.lock_path) || '' }}");
+    expect(verification).toContain('PHV_DEPLOY_TIMEOUT: ${{ inputs.deploy_timeout }}');
+    // The remediation's own comparison is of the branch, not of the commit the dispatch ran on.
+    expect(job('verify')).toContain('lock_ref: ${{ inputs.branch }}');
+});

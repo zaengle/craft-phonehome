@@ -69,6 +69,28 @@ on:
         required: false
         type: string
         default: ''
+      lock_ref:
+        description: >-
+          For a compare: the commit the environment should now be running. Before the after side
+          is captured the runner waits until the environment reports the versions that commit's
+          composer.lock records, and ends inconclusive if it never does. Empty means the commit
+          that started the calling workflow, which is right for a push or a deployment_status
+          event. A caller started any other way names the deployed commit here.
+        required: false
+        type: string
+        default: ''
+      lock_path:
+        description: 'Where composer.lock sits in the calling repository.'
+        required: false
+        type: string
+        default: 'composer.lock'
+      deploy_timeout:
+        description: >-
+          For a compare: how many seconds to wait for the environment to be running lock_ref
+          before giving up as inconclusive.
+        required: false
+        type: number
+        default: 900
       runner_ref:
         description: >-
           Which commit of this repository the runner is taken from. Empty means the commit this
@@ -144,6 +166,18 @@ jobs:
           ref: ${{ inputs.runner_ref || job.workflow_sha }}
           path: runner
 
+      # The lock file of the commit the comparison is about, and nothing else of the site. It is
+      # what the runner waits for the environment to report before it captures the after side, so
+      # a comparison started by a push cannot run against the environment the push has not reached.
+      - name: Check out the lock file the environment should be running
+        if: inputs.mode == 'compare'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.lock_ref || github.sha }}
+          path: site
+          sparse-checkout: ${{ inputs.lock_path }}
+          sparse-checkout-cone-mode: false
+
       - name: Install the runner's dependencies
         working-directory: runner/tools/site-verification
         run: npm ci
@@ -174,6 +208,11 @@ jobs:
           PHV_EXPECT_CHANGE: ${{ inputs.expect_change && '1' || '0' }}
           PHV_EXPECT_PACKAGE: ${{ inputs.expect_package }}
           PHV_EXPECT_VERSION: ${{ inputs.expect_version }}
+          # Relative to this step's working directory. `github.workspace` would name the host's path,
+          # not the container's, inside a job that runs in a container.
+          PHV_EXPECT_LOCK: ${{ inputs.mode == 'compare' && format('../../../site/{0}', inputs.lock_path) || '' }}
+          PHV_EXPECT_LOCK_REF: ${{ inputs.lock_ref || github.sha }}
+          PHV_DEPLOY_TIMEOUT: ${{ inputs.deploy_timeout }}
           PHV_BASIC_AUTH_USER: ${{ secrets.basic_auth_user }}
           PHV_BASIC_AUTH_PASS: ${{ secrets.basic_auth_password }}
         run: npm run --silent ${{ inputs.mode }}

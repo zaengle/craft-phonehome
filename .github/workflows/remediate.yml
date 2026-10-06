@@ -286,6 +286,9 @@ jobs:
       expect_change: true
       expect_package: ${{ inputs.package }}
       expect_version: ${{ inputs.version }}
+      # The branch, not the commit that started this workflow: that is the default branch, which
+      # does not hold the change being verified.
+      lock_ref: ${{ inputs.branch }}
     secrets:
       phonehome_token: ${{ secrets.phonehome_token }}
       basic_auth_user: ${{ secrets.basic_auth_user }}
