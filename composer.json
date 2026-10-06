@@ -46,6 +46,7 @@
         "class": "zaengle\\phonehome\\PhoneHome"
     },
     "scripts": {
+        "test": "@php -d error_reporting=24575 vendor/bin/phpunit",
         "phpstan": "phpstan analyse --memory-limit=1G src/",
         "check-cs": "ecs check --ansi",
         "fix-cs": "ecs check --ansi --fix"

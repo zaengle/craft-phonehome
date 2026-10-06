@@ -3,6 +3,7 @@
 namespace zaengle\phonehome\statuschecks;
 
 use Craft;
+use craft\queue\Queue;
 use craft\queue\QueueInterface;
 use zaengle\phonehome\enums\StatusCheck;
 use zaengle\phonehome\models\Settings;
@@ -18,7 +19,7 @@ class QueueStatusCheck implements StatusCheckInterface
 
     public static function getDescription(): string
     {
-        return 'Monitors the Craft queue for failed and delayed jobs against configurable thresholds';
+        return 'Monitors the Craft queue for failed, delayed, and pending jobs against configurable thresholds';
     }
 
     /**
@@ -27,21 +28,35 @@ class QueueStatusCheck implements StatusCheckInterface
      */
     public static function check(?QueueInterface $queue = null): StatusCheckResult
     {
-        /** @var QueueInterface $queue */
         $queue = $queue ?? Craft::$app->getQueue();
+
+        // getTotalFailed(), getTotalDelayed(), getTotalWaiting() and getTotalReserved()
+        // are declared on craft\queue\Queue, not on QueueInterface, so a site that has
+        // swapped in another yii\queue driver has no counts for us to score. Craft
+        // guards the same way before offering its own Queue Manager utility.
+        if (!$queue instanceof Queue) {
+            return self::getUnsupportedDriverResult($queue);
+        }
 
         /** @var Settings $settings */
         $settings = PhoneHome::getInstance()->getSettings();
 
+        // Read each count once. getTotal*() re-queries on every call, so reading them
+        // twice would let the reported status disagree with the reported counts.
+        $failed = $queue->getTotalFailed();
+        $delayed = $queue->getTotalDelayed();
+        $waiting = $queue->getTotalWaiting();
+        $reserved = $queue->getTotalReserved();
+
         return new StatusCheckResult([
             'name' => self::getName(),
-            'status' => self::getStatus($queue, $settings),
+            'status' => self::getStatus($failed, $delayed, $waiting, $settings),
             'description' => self::getDescription(),
             'meta' => [
-                'delayed' => $queue->getTotalDelayed(),
-                'waiting' => $queue->getTotalWaiting(),
-                'failed' => $queue->getTotalFailed(),
-                'reserved' => $queue->getTotalReserved(),
+                'delayed' => $delayed,
+                'waiting' => $waiting,
+                'failed' => $failed,
+                'reserved' => $reserved,
                 'thresholds' => [
                     'failed' => [
                         'warning' => $settings->getQueueFailedWarningThreshold(),
@@ -51,55 +66,94 @@ class QueueStatusCheck implements StatusCheckInterface
                         'warning' => $settings->getQueueDelayedWarningThreshold(),
                         'critical' => $settings->getQueueDelayedCriticalThreshold(),
                     ],
+                    // The `pending` thresholds are compared against `meta.waiting`,
+                    // which is what Craft's CP labels "Pending"
+                    'pending' => [
+                        'warning' => $settings->getQueuePendingWarningThreshold(),
+                        'critical' => $settings->getQueuePendingCriticalThreshold(),
+                    ],
                 ],
             ],
         ]);
     }
 
-    protected static function getStatus(QueueInterface $queue, Settings $settings): StatusCheck
+    protected static function getStatus(int $failed, int $delayed, int $waiting, Settings $settings): StatusCheck
     {
-        $failedStatus = self::getFailedJobsStatus($queue, $settings);
-        $delayedStatus = self::getDelayedJobsStatus($queue, $settings);
+        $statuses = [
+            self::getFailedJobsStatus($failed, $settings),
+            self::getDelayedJobsStatus($delayed, $settings),
+            self::getPendingJobsStatus($waiting, $settings),
+        ];
 
         // CRITICAL takes precedence, then WARNING, then OK
-        if ($failedStatus === StatusCheck::CRITICAL || $delayedStatus === StatusCheck::CRITICAL) {
+        if (in_array(StatusCheck::CRITICAL, $statuses, true)) {
             return StatusCheck::CRITICAL;
         }
 
-        if ($failedStatus === StatusCheck::WARNING || $delayedStatus === StatusCheck::WARNING) {
+        if (in_array(StatusCheck::WARNING, $statuses, true)) {
             return StatusCheck::WARNING;
         }
 
         return StatusCheck::OK;
     }
 
-    protected static function getFailedJobsStatus(QueueInterface $queue, Settings $settings): StatusCheck
+    protected static function getFailedJobsStatus(int $failed, Settings $settings): StatusCheck
     {
-        $failed = $queue->getTotalFailed();
+        return self::compareToThresholds(
+            $failed,
+            $settings->getQueueFailedWarningThreshold(),
+            $settings->getQueueFailedCriticalThreshold(),
+        );
+    }
 
-        if ($failed >= $settings->getQueueFailedCriticalThreshold()) {
+    protected static function getDelayedJobsStatus(int $delayed, Settings $settings): StatusCheck
+    {
+        return self::compareToThresholds(
+            $delayed,
+            $settings->getQueueDelayedWarningThreshold(),
+            $settings->getQueueDelayedCriticalThreshold(),
+        );
+    }
+
+    protected static function getPendingJobsStatus(int $waiting, Settings $settings): StatusCheck
+    {
+        return self::compareToThresholds(
+            $waiting,
+            $settings->getQueuePendingWarningThreshold(),
+            $settings->getQueuePendingCriticalThreshold(),
+        );
+    }
+
+    /**
+     * A threshold of 0 disables that level, so an unset env var can't pin the check
+     * to WARNING or CRITICAL permanently.
+     */
+    protected static function compareToThresholds(int $count, int $warning, int $critical): StatusCheck
+    {
+        if ($critical > 0 && $count >= $critical) {
             return StatusCheck::CRITICAL;
         }
 
-        if ($failed >= $settings->getQueueFailedWarningThreshold()) {
+        if ($warning > 0 && $count >= $warning) {
             return StatusCheck::WARNING;
         }
 
         return StatusCheck::OK;
     }
 
-    protected static function getDelayedJobsStatus(QueueInterface $queue, Settings $settings): StatusCheck
+    protected static function getUnsupportedDriverResult(object $queue): StatusCheckResult
     {
-        $delayed = $queue->getTotalDelayed();
-
-        if ($delayed >= $settings->getQueueDelayedCriticalThreshold()) {
-            return StatusCheck::CRITICAL;
-        }
-
-        if ($delayed >= $settings->getQueueDelayedWarningThreshold()) {
-            return StatusCheck::WARNING;
-        }
-
-        return StatusCheck::OK;
+        return new StatusCheckResult([
+            'name' => self::getName(),
+            'status' => StatusCheck::OK,
+            'description' => self::getDescription(),
+            'meta' => [
+                'error' => sprintf(
+                    'Job counts are unavailable for this queue driver (%s); only %s reports them.',
+                    $queue::class,
+                    Queue::class,
+                ),
+            ],
+        ]);
     }
 }
