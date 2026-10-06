@@ -101,7 +101,6 @@ jobs:
     outputs:
       existing: ${{ steps.branch.outputs.existing }}
       has_pr: ${{ steps.branch.outputs.has_pr }}
-      run_id: ${{ steps.run.outputs.run_id }}
       runner_ref: ${{ steps.run.outputs.runner_ref }}
 
     steps:
@@ -143,22 +142,22 @@ jobs:
 
           echo "existing=$existing" >> "$GITHUB_OUTPUT"
 
-      # The one run id both halves of the verification share, minted once so the two cannot drift.
-      # `github.run_id` makes it new for every dispatch and `github.run_attempt` for every re-run
-      # of one, so a re-run can never be compared against a reference an earlier attempt captured,
-      # nor refused because that earlier attempt already sealed a baseline under the same name.
-      #
       # The runner pin is `job.workflow_sha`: the commit of the workflow file that defines this job,
       # which for a reusable workflow is this file's own commit. It is read here, in a step, because
       # the `job` context is not available where a reusable workflow is called with inputs.
-      - name: Name the verification bundle and pin the runner
+      - name: Pin the runner
         id: run
-        run: |
-          echo "run_id=remediation-${{ inputs.patch_id }}-${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_OUTPUT"
-          echo "runner_ref=${{ inputs.runner_ref || job.workflow_sha }}" >> "$GITHUB_OUTPUT"
+        run: echo "runner_ref=${{ inputs.runner_ref || job.workflow_sha }}" >> "$GITHUB_OUTPUT"
 
-  # Freezes the verification environment before anything touches it, under the run id `check`
-  # minted, which `verify` reads from the same place.
+  # Freezes the verification environment before anything touches it.
+  #
+  # The run id is built here and in `verify` from the same three values, rather than passed out of
+  # `check`, so that it is new for every attempt. "Re-run failed jobs" does not repeat a job that
+  # succeeded, and an id taken from `check`'s output kept the first attempt's number on the pilot's
+  # re-run. Every job in one attempt shares `github.run_attempt`, so the two halves still agree. A
+  # re-run that repeats the comparison but not the baseline therefore finds no baseline under its
+  # id, and is inconclusive with a reason saying to use "Re-run all jobs"; reusing an earlier
+  # attempt's capture is what the id exists to prevent.
   #
   # The wrapper workflow below names a fixed ref because a `uses:` ref cannot be an expression.
   # It is the feature branch until this is released, and the release moves it to the tag in the
@@ -171,7 +170,7 @@ jobs:
     uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@feature/verification-manifest-poc
     with:
       mode: capture
-      run_id: ${{ needs.check.outputs.run_id }}
+      run_id: remediation-${{ inputs.patch_id }}-${{ github.run_id }}-${{ github.run_attempt }}
       origin: ${{ inputs.verify_origin }}
       dashboard_origin: ${{ inputs.dashboard_origin }}
       patch_id: ${{ inputs.patch_id }}
@@ -283,7 +282,7 @@ jobs:
     uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@feature/verification-manifest-poc
     with:
       mode: compare
-      run_id: ${{ needs.check.outputs.run_id }}
+      run_id: remediation-${{ inputs.patch_id }}-${{ github.run_id }}-${{ github.run_attempt }}
       origin: ${{ inputs.verify_origin }}
       dashboard_origin: ${{ inputs.dashboard_origin }}
       patch_id: ${{ inputs.patch_id }}

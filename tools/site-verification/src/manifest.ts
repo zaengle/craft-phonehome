@@ -665,6 +665,33 @@ export function describeEnvironmentDelta(before: Record<string, string> | undefi
     return { known: true, changed, current: after };
 }
 
+/**
+ * Why a comparison found no baseline to compare against.
+ *
+ * In a workflow re-run this is usually not a lost capture. The run id carries the attempt number,
+ * so a re-run that repeats the comparison without repeating the baseline asks for a capture nobody
+ * took. That is the honest outcome -- reusing the earlier attempt's capture is what the id exists
+ * to prevent -- but the remedy is "Re-run all jobs", and the reason says so.
+ */
+export function noBaselineAbort(bundleDir: string, runId: string, runAttempt: string | undefined): Abort {
+    const attempt = Number(runAttempt ?? '1');
+
+    if (Number.isInteger(attempt) && attempt > 1) {
+        return {
+            reason: 'no_baseline',
+            detail: [
+                `No baseline was captured under ${runId}. This is attempt ${attempt} of the workflow run, and a re-run of only the failed jobs repeats the comparison without repeating the baseline.`,
+                'Use "Re-run all jobs" so the baseline is captured again under this attempt\'s run id.',
+            ],
+        };
+    }
+
+    return {
+        reason: 'no_baseline',
+        detail: [`${bundleDir} holds no completed capture.`, 'Either none was taken, or the capture that was taken did not finish successfully.'],
+    };
+}
+
 export function isAbort<T extends object>(value: T | Abort): value is Abort {
     return 'reason' in value;
 }

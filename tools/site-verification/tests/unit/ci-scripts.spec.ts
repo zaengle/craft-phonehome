@@ -355,6 +355,25 @@ test.describe('summarise.mjs', () => {
         ).toContain('environment=Environment: craftcms/cms 5.8.14 → 5.8.15.');
     });
 
+    test('a comparison re-run without its baseline leads with Re-run all jobs', () => {
+        const { stdout, outputs } = summarise({
+            overall: 'inconclusive',
+            mode: 'compare',
+            checks: [
+                {
+                    id: 'gate',
+                    kind: 'gate',
+                    outcome: 'inconclusive',
+                    diagnostic: 'Error: INCONCLUSIVE: no_baseline — No baseline was captured under remediation-31-1-2. … Use "Re-run all jobs" so the baseline is captured again under this attempt\'s run id.',
+                },
+            ],
+        });
+
+        expect(outputs).toContain('overall=inconclusive\n');
+        expect(outputs).toContain('summary=No baseline was captured under this attempt\'s run id, because only the failed jobs were re-run. Use "Re-run all jobs" to capture one.');
+        expect(stdout).toContain('Use "Re-run all jobs" so the baseline is captured again.');
+    });
+
     test('a capture has no environment line', () => {
         expect(summarise({ overall: 'passed', checks: [] }).outputs).toContain('environment=\n');
     });

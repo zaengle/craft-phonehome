@@ -9,6 +9,7 @@ import {
     expectedChecks,
     fetchReport,
     isAbort,
+    noBaselineAbort,
     readCaptureRecord,
     readFrozenManifest,
     readIdentity,
@@ -160,10 +161,7 @@ async function prepareCompare(): Promise<void> {
     const record = readCaptureRecord(config.bundleDir);
 
     if (record === null) {
-        abort('no_baseline', [
-            `${config.bundleDir} holds no completed capture.`,
-            'Either none was taken, or the capture that was taken did not finish successfully.',
-        ]);
+        writeBundle(config.bundleDir, noBaselineAbort(config.bundleDir, config.runId, process.env.GITHUB_RUN_ATTEMPT));
 
         return;
     }

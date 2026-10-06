@@ -23,14 +23,19 @@ function job(name: string): string {
 /** The `verify` job's `if:` line. */
 const verifyCondition = job('verify').match(/\n {4}if: (.*)\n/)?.[1] ?? '';
 
-test('both halves of the verification name the bundle from one place', () => {
-    // The value handed to each half of the verification, as opposed to the `check` job's own
-    // output line that publishes it.
-    const passed = [...remediate.matchAll(/^ {6}run_id: (.*)$/gm)].map((match) => match[1]).filter((value) => value.includes('needs.'));
+test('both halves of the verification build the same run id, new for every attempt', () => {
+    // Built in each job rather than passed out of `check`: "Re-run failed jobs" does not repeat a
+    // job that succeeded, so an id minted there kept the first attempt's number on the pilot's
+    // re-run. Every job in one attempt shares `github.run_attempt`, so the halves still agree.
+    const passed = [...remediate.matchAll(/^ {6}run_id: (.*)$/gm)].map((match) => match[1]);
 
-    expect(passed).toEqual(['${{ needs.check.outputs.run_id }}', '${{ needs.check.outputs.run_id }}']);
-    expect(remediate.match(/run_id=remediation-/g)).toHaveLength(1);
-    expect(remediate).not.toMatch(/run_id: remediation-/);
+    expect(passed).toEqual([
+        'remediation-${{ inputs.patch_id }}-${{ github.run_id }}-${{ github.run_attempt }}',
+        'remediation-${{ inputs.patch_id }}-${{ github.run_id }}-${{ github.run_attempt }}',
+    ]);
+    expect(job('baseline')).toContain(passed[0]);
+    expect(job('verify')).toContain(passed[1]);
+    expect(remediate).not.toContain('outputs.run_id');
 });
 
 test('the comparison only runs against a baseline whose capture passed', () => {
@@ -110,10 +115,6 @@ test('a dispatch with no environment skips the pair and still opens the pull req
     expect(job('baseline')).toContain("if: needs.check.outputs.has_pr == '0' && inputs.verify_origin != ''");
     expect(job('pull_request').match(/\n {4}if: (.*)\n/)?.[1]).not.toContain('needs.baseline');
     expect(job('pull_request').match(/\n {4}if: (.*)\n/)?.[1]).not.toContain('needs.verify');
-});
-
-test('a re-run gets its own baseline identity', () => {
-    expect(remediate).toContain('run_id=remediation-${{ inputs.patch_id }}-${{ github.run_id }}-${{ github.run_attempt }}');
 });
 
 test('a pushed branch gets its pull request even when Phone Home cannot be reached', () => {
