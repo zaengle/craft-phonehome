@@ -1,0 +1,20 @@
+{
+  "name": "example",
+  "lockfileVersion": 1,
+  "dependencies": {
+    "vite": {
+      "version": "6.0.3"
+    },
+    "@vitejs/plugin-vue": {
+      "version": "5.2.1"
+    },
+    "vitest": {
+      "version": "2.1.1",
+      "dependencies": {
+        "vite": {
+          "version": "5.4.0"
+        }
+      }
+    }
+  }
+}
