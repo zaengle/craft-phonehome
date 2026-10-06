@@ -58,6 +58,15 @@ export function summarise(report, unstoredBaseline = null) {
 
     const lines = [`## Verification: ${overall.toUpperCase() || 'UNKNOWN'}`, ''];
 
+    // A comparison that found no baseline because it was re-run without one. The remedy is a
+    // button in the Actions UI, so it leads the summary rather than sitting in a table cell.
+    const rerun = checks.find((check) => check.kind === 'gate' && String(check.diagnostic ?? '').includes('Re-run all jobs'));
+
+    if (rerun) {
+        summary = `No baseline was captured under this attempt's run id, because only the failed jobs were re-run. Use "Re-run all jobs" to capture one. ${summary}`;
+        lines.push('**No baseline was captured under this attempt\'s run id**, because only the failed jobs were re-run. Use "Re-run all jobs" so the baseline is captured again.', '');
+    }
+
     if (unstoredBaseline !== null) {
         summary = `The baseline could not be stored on Phone Home (${unstoredBaseline}), so nothing can be compared against this capture. ${summary}`;
         lines.push(`**The baseline could not be stored on Phone Home:** ${unstoredBaseline}. Nothing can be compared against this capture.`, '');

@@ -9,6 +9,7 @@ import {
     expectedChecks,
     fetchReport,
     isAbort,
+    noBaselineAbort,
     readCaptureRecord,
     readFrozenManifest,
     readIdentity,
@@ -21,6 +22,7 @@ import {
     pullBaseline,
     type CaptureRecord,
 } from './src/manifest';
+import { notDeployedAbort, readLockFile, waitForLock } from './src/deployed';
 
 /**
  * The manifest is resolved here, at config load, rather than in a globalSetup hook, because the
@@ -30,6 +32,8 @@ import {
 const config = runConfig();
 const paths = bundlePaths(config.bundleDir);
 const VIEWPORT = { width: 1440, height: 900 };
+// Staging's credentials also protect its API, but must not be sent to a separate API host.
+const apiBasicAuth = new URL(config.apiOrigin).origin === new URL(config.origin).origin ? config.basicAuth : null;
 
 // Playwright evaluates this config file again in every worker, so each of these side effects would
 // otherwise run twice: two API fetches, and a second rewrite of the frozen manifest from a later
@@ -115,8 +119,9 @@ async function prepareCapture(): Promise<void> {
     rmSync(paths.manifest, { force: true });
     rmSync(paths.drift, { force: true });
     rmSync(paths.environment, { force: true });
+    rmSync(`${config.bundleDir}/baseline-unstored.txt`, { force: true });
 
-    const report = await fetchReport(config.apiOrigin, config.token, config.insecureTls);
+    const report = await fetchReport(config.apiOrigin, config.token, config.insecureTls, apiBasicAuth);
 
     if (isAbort(report)) {
         writeBundle(config.bundleDir, report);
@@ -159,10 +164,7 @@ async function prepareCompare(): Promise<void> {
     const record = readCaptureRecord(config.bundleDir);
 
     if (record === null) {
-        abort('no_baseline', [
-            `${config.bundleDir} holds no completed capture.`,
-            'Either none was taken, or the capture that was taken did not finish successfully.',
-        ]);
+        writeBundle(config.bundleDir, noBaselineAbort(config.bundleDir, config.runId, process.env.GITHUB_RUN_ATTEMPT));
 
         return;
     }
@@ -175,10 +177,16 @@ async function prepareCompare(): Promise<void> {
         return;
     }
 
+    // The environment has to be running the commit this comparison is about before the after side
+    // is captured. Whatever started the run, a push or a deploy, only the environment can say so.
+    if (config.expectLock !== null && !(await waitForDeploy(config.expectLock))) {
+        return;
+    }
+
     // Confirm the site is actually answering before any page result is believed. A host that has
     // gone away can still serve a router's 404 for every path, which reads as a page-by-page
     // failure when it is really an inability to verify anything at all.
-    const current = await fetchReport(config.apiOrigin, config.token, config.insecureTls);
+    const current = await fetchReport(config.apiOrigin, config.token, config.insecureTls, apiBasicAuth);
 
     if (isAbort(current)) {
         writeBundle(config.bundleDir, current);
@@ -205,6 +213,57 @@ async function prepareCompare(): Promise<void> {
             `Environment since capture:\n  ${environment.changed.map((entry) => `${entry.name} ${entry.before ?? 'absent'} → ${entry.after ?? 'removed'}`).join('\n  ')}\n`,
         );
     }
+}
+
+/**
+ * Polls the plugin's report until the environment reports what the lock file records.
+ *
+ * Returns false, having written the reason into the bundle, when it never does. The comparison
+ * then ends inconclusive naming the versions it waited for, never passed.
+ */
+async function waitForDeploy(lockPath: string): Promise<boolean> {
+    let lock: Record<string, string>;
+
+    try {
+        lock = readLockFile(lockPath);
+    } catch (error) {
+        abort('no_lock', [`Could not read ${lockPath}: ${(error as Error).message}`, 'Without it the runner cannot tell whether the environment is running the commit.']);
+
+        return false;
+    }
+
+    if (Object.keys(lock).length === 0) {
+        abort('no_lock', [`${lockPath} records no packages, so the runner cannot tell whether the environment is running the commit.`]);
+
+        return false;
+    }
+
+    const ref = config.expectLockRef ?? lockPath;
+
+    process.stdout.write(`Waiting up to ${Math.round(config.deployTimeoutMs / 1000)}s for ${config.origin} to report the versions in ${ref}'s composer.lock\n`);
+
+    const outcome = await waitForLock(
+        lock,
+        async () => {
+            const report = await fetchReport(config.apiOrigin, config.token, config.insecureTls, apiBasicAuth);
+
+            return isAbort(report) ? `${report.reason}: ${report.detail.join(' ')}` : readPackages(report.payload);
+        },
+        { timeoutMs: config.deployTimeoutMs, intervalMs: config.deployIntervalMs },
+    );
+
+    if (outcome.deployed) {
+        process.stdout.write(`${config.origin} is running ${ref} (after ${outcome.polls} check(s))\n`);
+
+        return true;
+    }
+
+    const refusal = notDeployedAbort(outcome, config.origin, ref, config.deployTimeoutMs);
+
+    process.stdout.write(`${refusal.detail.join('\n')}\n`);
+    writeBundle(config.bundleDir, refusal);
+
+    return false;
 }
 
 function abort(reason: string, detail: string[]): void {
@@ -268,4 +327,3 @@ export default defineConfig({
     },
     projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
 });
-

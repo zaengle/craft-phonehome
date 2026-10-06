@@ -73,6 +73,8 @@ told which baseline it is comparing against. Generating one would compare a run 
 | `PHV_RUN_ID` | Identifies the frozen bundle |
 | `PHV_API_ORIGIN` | Plugin API origin, when it differs from the site origin |
 | `PHV_INSECURE_TLS` | Accepts a self-signed certificate, for one request, for local work only |
+| `PHV_EXPECT_LOCK` | For `compare`: a `composer.lock` the environment must report before the after side is captured |
+| `PHV_DEPLOY_TIMEOUT` | Seconds to wait for the environment to report `PHV_EXPECT_LOCK`, 900 by default |
 
 ## Running it in CI
 
@@ -82,6 +84,14 @@ a capture pushes its bundle; a comparison with nothing local pulls it back befor
 
 `.github/workflows/site-verification.yml` in this repository is a reusable workflow. A site calls it
 around its existing deploy; see `examples/verify-on-deploy.yml` for the whole file to copy.
+
+A comparison waits for the environment rather than for whatever started it. The workflow checks out
+the `composer.lock` of the commit the comparison is about (`lock_ref`, which defaults to the commit
+that started the calling workflow) and the runner polls the plugin's report until the environment
+reports the Craft and plugin versions it records. When `deploy_timeout` passes first, the outcome
+is `inconclusive` with a reason naming the versions it was waiting for, never `passed`. A host that
+deploys on its own after a push is the case this exists for: without it the comparison measured the
+environment before the deploy reached it.
 
 The workflow publishes two outputs, `overall` and `summary`, carrying what the runner concluded. A
 caller that quotes the result anywhere should read those rather than the job's status: the job
@@ -119,9 +129,9 @@ Note that **CI captures its own baselines**. A baseline taken on an Apple Silico
 bundles are for local work.
 
 If the environment sits behind HTTP basic auth — staging commonly does — set `PHV_BASIC_AUTH_USER`
-and `PHV_BASIC_AUTH_PASS`. Without them the runner photographs the browser's own auth prompt and
-reports a missing required element on every page, which is a `failed` that says nothing about the
-deploy.
+and `PHV_BASIC_AUTH_PASS`. These credentials cover the browser and the plugin API when it is on the
+same origin. A separate `PHV_API_ORIGIN` receives only the Phone Home token. Without credentials a
+protected API makes the run inconclusive, and protected pages cannot be verified.
 
 ## Outcomes
 

@@ -94,9 +94,15 @@ if [ -n "$scale" ]; then
 fi
 echo "**What moved**"
 echo
-echo '```'
-echo "$MOVED"
-echo '```'
+# Empty when this run resumed a branch an earlier run pushed, or redid one on a re-run, because the
+# step that resolves the change is skipped then. Said so rather than shown as an empty block.
+if [ -n "$MOVED" ]; then
+    echo '```'
+    echo "$MOVED"
+    echo '```'
+else
+    echo "This run used a branch an earlier run had already pushed, so what moved is in that branch's commit rather than repeated here."
+fi
 echo
 echo "$verdict"
 echo

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -10,6 +10,51 @@ import { join } from 'node:path';
  * distinguish is pinned here rather than discovered on a real run.
  */
 const ci = new URL('../../ci', import.meta.url).pathname;
+
+test('the CI linter receives the whole ignore pattern as one argument', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'phv-actionlint-'));
+    const calls = join(dir, 'calls');
+    writeFileSync(join(dir, 'docker'), `#!/usr/bin/env node
+require('fs').writeFileSync(process.env.CALLS, JSON.stringify(process.argv.slice(2)));
+`, { mode: 0o755 });
+    const workflow = readFileSync(new URL('../../../../.github/workflows/tests.yml', import.meta.url), 'utf8');
+    const step = workflow.split('      - name: Lint the workflows\n')[1].split('      - name: Set up Node\n')[0];
+    expect(step).toContain('        run: |\n');
+    const script = step.split('        run: |\n')[1].split('\n').map((line) => line.replace(/^ {10}/, '')).join('\n');
+    const run = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', script], {
+        cwd: dir,
+        env: { PATH: `${dir}:${process.env.PATH ?? ''}`, CALLS: calls },
+        encoding: 'utf8',
+    });
+
+    expect(run.status, run.stderr).toBe(0);
+    const args = JSON.parse(readFileSync(calls, 'utf8')) as string[];
+    expect(args.slice(args.indexOf('-ignore'))).toEqual(['-ignore', 'property "workflow_sha" is not defined in object type']);
+});
+
+test('the workflow treats shell syntax in remediation inputs as literal commit arguments', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'phv-input-'));
+    const marker = join(dir, 'executed');
+    const calls = join(dir, 'calls');
+    writeFileSync(join(dir, 'git'), `#!/usr/bin/env node
+require('fs').appendFileSync(process.env.CALLS, JSON.stringify(process.argv.slice(2)) + '\\n');
+`, { mode: 0o755 });
+    const workflow = readFileSync(new URL('../../../../.github/workflows/remediate.yml', import.meta.url), 'utf8');
+    const step = workflow.split('      - name: Push the branch\n')[1].split('\n  # Waits for the baseline')[0];
+    const script = step.split('        run: |\n')[1].split('\n').map((line) => line.replace(/^ {10}/, '')).join('\n');
+    const version = `5.8.15 $(touch "${marker}")`;
+    const run = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', script], {
+        cwd: dir,
+        env: { PATH: `${dir}:${process.env.PATH ?? ''}`, CALLS: calls, BRANCH: 'security/patch-1', PACKAGE: 'craftcms/cms', VERSION: version, PATCH_ID: '1' },
+        encoding: 'utf8',
+    });
+
+    expect(run.status, run.stderr).toBe(0);
+    expect(existsSync(marker)).toBe(false);
+    expect(readFileSync(calls, 'utf8').trim().split('\n').map((line) => JSON.parse(line))).toContainEqual([
+        'commit', '-m', `Security: craftcms/cms to ${version} (patch #1)`,
+    ]);
+});
 
 function prBody(env: Record<string, string>): string {
     const run = spawnSync('bash', [join(ci, 'pr-body.sh')], {
@@ -117,6 +162,86 @@ test.describe('pr-body.sh', () => {
         const body = prBody({ ...verified, MOVED: 'vendor/pkg "^2" -> 2.0.0' });
 
         expect(body).toContain('vendor/pkg "^2" -> 2.0.0');
+    });
+});
+
+test.describe('pr-body.sh on a resumed branch', () => {
+    test('a branch an earlier run pushed points at its commit rather than showing an empty list', () => {
+        const body = prBody({ ...verified, MOVED: '', COUNT: '' });
+
+        expect(body).toContain("so what moved is in that branch's commit rather than repeated here.");
+        expect(body).not.toContain('```\n\n```');
+    });
+});
+
+/**
+ * A stand-in `gh` for open-pr.sh, recording each call so a test can say which of create and edit
+ * ran. `openUrl` is the pull request already open for the branch, or empty for none.
+ */
+function fakePrGh(openUrl: string): { dir: string; calls: string } {
+    const dir = mkdtempSync(join(tmpdir(), 'phv-gh-'));
+    const calls = join(dir, 'calls');
+
+    writeFileSync(calls, '');
+    writeFileSync(
+        join(dir, 'gh'),
+        `#!/usr/bin/env bash
+echo "$*" >> '${calls}'
+case "$1 $2" in
+  "pr list") echo '${openUrl}' ;;
+  "pr edit") exit 0 ;;
+  "pr create") echo "https://github.com/z/x/pull/26" ;;
+  *) echo "unexpected gh $*" >&2; exit 64 ;;
+esac`,
+    );
+    spawnSync('chmod', ['+x', join(dir, 'gh')]);
+
+    return { dir, calls };
+}
+
+function openPr(openUrl: string) {
+    const gh = fakePrGh(openUrl);
+    const outputs = join(gh.dir, 'outputs');
+    writeFileSync(outputs, '');
+
+    const run = spawnSync('bash', [join(ci, 'open-pr.sh')], {
+        env: {
+            PATH: `${gh.dir}:${process.env.PATH ?? ''}`,
+            GITHUB_OUTPUT: outputs,
+            BRANCH: 'security/patch-31-site-2',
+            BASE: 'main',
+            TITLE: 'Security: craftcms/cms to 5.8.15',
+            BODY_FILE: '/tmp/pr-body.md',
+        },
+        encoding: 'utf8',
+    });
+
+    return { status: run.status, stderr: run.stderr, outputs: readFileSync(outputs, 'utf8'), calls: readFileSync(gh.calls, 'utf8').trim().split('\n') };
+}
+
+test.describe('open-pr.sh', () => {
+    test('with no pull request open, a draft is created and its URL published', () => {
+        const result = openPr('');
+
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.calls).toEqual([
+            'pr list --head security/patch-31-site-2 --state open --json url --jq .[0].url // empty',
+            'pr create --draft --base main --head security/patch-31-site-2 --title Security: craftcms/cms to 5.8.15 --body-file /tmp/pr-body.md',
+        ]);
+        expect(result.outputs).toBe('url=https://github.com/z/x/pull/26\n');
+    });
+
+    test('a re-run updates the open pull request instead of asking for a second one', () => {
+        // The pilot's re-run: #25 was already open for the branch, GitHub refused a second pull
+        // request, the job failed, and #25 kept the first attempt's inconclusive verdict.
+        const result = openPr('https://github.com/z/x/pull/25');
+
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.calls).toEqual([
+            'pr list --head security/patch-31-site-2 --state open --json url --jq .[0].url // empty',
+            'pr edit https://github.com/z/x/pull/25 --body-file /tmp/pr-body.md',
+        ]);
+        expect(result.outputs).toBe('url=https://github.com/z/x/pull/25\n');
     });
 });
 
@@ -273,6 +398,25 @@ test.describe('summarise.mjs', () => {
         expect(
             summarise({ overall: 'passed', checks: [], environment_delta: { known: true, changed: [{ name: 'craftcms/cms', before: '5.8.14', after: '5.8.15' }] } }).outputs,
         ).toContain('environment=Environment: craftcms/cms 5.8.14 → 5.8.15.');
+    });
+
+    test('a comparison re-run without its baseline leads with Re-run all jobs', () => {
+        const { stdout, outputs } = summarise({
+            overall: 'inconclusive',
+            mode: 'compare',
+            checks: [
+                {
+                    id: 'gate',
+                    kind: 'gate',
+                    outcome: 'inconclusive',
+                    diagnostic: 'Error: INCONCLUSIVE: no_baseline — No baseline was captured under remediation-31-1-2. … Use "Re-run all jobs" so the baseline is captured again under this attempt\'s run id.',
+                },
+            ],
+        });
+
+        expect(outputs).toContain('overall=inconclusive\n');
+        expect(outputs).toContain('summary=No baseline was captured under this attempt\'s run id, because only the failed jobs were re-run. Use "Re-run all jobs" to capture one.');
+        expect(stdout).toContain('Use "Re-run all jobs" so the baseline is captured again.');
     });
 
     test('a capture has no environment line', () => {

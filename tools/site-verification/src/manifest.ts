@@ -65,7 +65,7 @@ export function bundlePaths(bundleDir: string) {
  * pointing the runner at a local DDEV origin cannot quietly relax certificate checking for anything
  * else the run does.
  */
-function postJson(url: string, token: string, insecureTls: boolean, body = '{}'): Promise<{ status: number; body: string }> {
+function postJson(url: string, token: string, insecureTls: boolean, body = '{}', basicAuth: { username: string; password: string } | null = null): Promise<{ status: number; body: string }> {
     const target = new URL(url);
     const send = target.protocol === 'https:' ? httpsRequest : httpRequest;
 
@@ -77,6 +77,7 @@ function postJson(url: string, token: string, insecureTls: boolean, body = '{}')
                 timeout: 15_000,
                 rejectUnauthorized: !insecureTls,
                 headers: {
+                    ...(basicAuth === null ? {} : { Authorization: `Basic ${Buffer.from(`${basicAuth.username}:${basicAuth.password}`).toString('base64')}` }),
                     'X-Auth-Token': token,
                     Accept: 'application/json',
                     'Content-Type': 'application/json',
@@ -439,11 +440,11 @@ export function postArtifact(
  * reports it disabled, and a site with a typo reports it invalid -- none of which may be treated as
  * a suite that ran and passed.
  */
-export async function fetchReport(apiOrigin: string, token: string, insecureTls = false): Promise<{ manifest: Manifest; payload: Record<string, unknown> } | Abort> {
+export async function fetchReport(apiOrigin: string, token: string, insecureTls = false, basicAuth: { username: string; password: string } | null = null): Promise<{ manifest: Manifest; payload: Record<string, unknown> } | Abort> {
     let payload: Record<string, unknown>;
 
     try {
-        const response = await postJson(`${apiOrigin}/actions/phonehome/api`, token, insecureTls);
+        const response = await postJson(`${apiOrigin}/actions/phonehome/api`, token, insecureTls, '{}', basicAuth);
 
         if (response.status < 200 || response.status >= 300) {
             return { reason: 'api_unavailable', detail: [`The plugin API answered ${response.status}.`] };
@@ -663,6 +664,33 @@ export function describeEnvironmentDelta(before: Record<string, string> | undefi
         .map((name) => ({ name, before: before[name] ?? null, after: after[name] ?? null }));
 
     return { known: true, changed, current: after };
+}
+
+/**
+ * Why a comparison found no baseline to compare against.
+ *
+ * In a workflow re-run this is usually not a lost capture. The run id carries the attempt number,
+ * so a re-run that repeats the comparison without repeating the baseline asks for a capture nobody
+ * took. That is the honest outcome -- reusing the earlier attempt's capture is what the id exists
+ * to prevent -- but the remedy is "Re-run all jobs", and the reason says so.
+ */
+export function noBaselineAbort(bundleDir: string, runId: string, runAttempt: string | undefined): Abort {
+    const attempt = Number(runAttempt ?? '1');
+
+    if (Number.isInteger(attempt) && attempt > 1) {
+        return {
+            reason: 'no_baseline',
+            detail: [
+                `No baseline was captured under ${runId}. This is attempt ${attempt} of the workflow run, and a re-run of only the failed jobs repeats the comparison without repeating the baseline.`,
+                'Use "Re-run all jobs" so the baseline is captured again under this attempt\'s run id.',
+            ],
+        };
+    }
+
+    return {
+        reason: 'no_baseline',
+        detail: [`${bundleDir} holds no completed capture.`, 'Either none was taken, or the capture that was taken did not finish successfully.'],
+    };
 }
 
 export function isAbort<T extends object>(value: T | Abort): value is Abort {

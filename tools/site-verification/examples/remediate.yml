@@ -47,7 +47,10 @@ concurrency:
 
 jobs:
   remediate:
-    uses: zaengle/craft-phonehome/.github/workflows/remediate.yml@1.8.0 # the release tag; the runner follows this file's commit, so this is the one thing to pin
+    # Replace RELEASE_TAG_TO_FILL_IN with the plugin release tag this site should run, 1.8.0 or
+    # later; 1.8.0 is the first release that carries these workflows. A tag, never a branch: the
+    # runner follows this file's commit, so this is the one thing to pin.
+    uses: zaengle/craft-phonehome/.github/workflows/remediate.yml@RELEASE_TAG_TO_FILL_IN
     with:
       patch_id: ${{ inputs.patch_id }}
       site_id: ${{ inputs.site_id }}

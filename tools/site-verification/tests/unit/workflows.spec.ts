@@ -23,14 +23,19 @@ function job(name: string): string {
 /** The `verify` job's `if:` line. */
 const verifyCondition = job('verify').match(/\n {4}if: (.*)\n/)?.[1] ?? '';
 
-test('both halves of the verification name the bundle from one place', () => {
-    // The value handed to each half of the verification, as opposed to the `check` job's own
-    // output line that publishes it.
-    const passed = [...remediate.matchAll(/^ {6}run_id: (.*)$/gm)].map((match) => match[1]).filter((value) => value.includes('needs.'));
+test('both halves of the verification build the same run id, new for every attempt', () => {
+    // Built in each job rather than passed out of `check`: "Re-run failed jobs" does not repeat a
+    // job that succeeded, so an id minted there kept the first attempt's number on the pilot's
+    // re-run. Every job in one attempt shares `github.run_attempt`, so the halves still agree.
+    const passed = [...remediate.matchAll(/^ {6}run_id: (.*)$/gm)].map((match) => match[1]);
 
-    expect(passed).toEqual(['${{ needs.check.outputs.run_id }}', '${{ needs.check.outputs.run_id }}']);
-    expect(remediate.match(/run_id=remediation-/g)).toHaveLength(1);
-    expect(remediate).not.toMatch(/run_id: remediation-/);
+    expect(passed).toEqual([
+        'remediation-${{ inputs.patch_id }}-${{ github.run_id }}-${{ github.run_attempt }}',
+        'remediation-${{ inputs.patch_id }}-${{ github.run_id }}-${{ github.run_attempt }}',
+    ]);
+    expect(job('baseline')).toContain(passed[0]);
+    expect(job('verify')).toContain(passed[1]);
+    expect(remediate).not.toContain('outputs.run_id');
 });
 
 test('the comparison only runs against a baseline whose capture passed', () => {
@@ -39,6 +44,11 @@ test('the comparison only runs against a baseline whose capture passed', () => {
 
 test('the comparison only runs after the deploy succeeded', () => {
     expect(verifyCondition).toContain("needs.deploy.result == 'success'");
+    expect(verifyCondition).toContain("needs.deploy.outputs.deployed == '1'");
+});
+
+test('the deploy requires a sealed baseline stored on Phone Home', () => {
+    expect(job('deploy')).toContain("needs.baseline.outputs.overall == 'passed'");
 });
 
 test('the comparison expects the site to have changed', () => {
@@ -56,7 +66,8 @@ test('the pull request is opened whatever the verification concluded, as long as
 test('the runner follows the workflow file it was released with', () => {
     // `job.workflow_sha` is the documented context; `github.job_workflow_sha` does not exist and
     // an earlier version of this file asserted it into place.
-    expect(remediate).toContain('runner_ref=${{ inputs.runner_ref || job.workflow_sha }}');
+    expect(remediate).toContain('RUNNER_REF: ${{ inputs.runner_ref || job.workflow_sha }}');
+    expect(remediate).toContain('runner_ref=$RUNNER_REF');
     expect(remediate).not.toContain('job_workflow_sha');
     expect(remediate.match(/^\s+ref: \$\{\{ needs\.check\.outputs\.runner_ref \}\}$/gm)?.length ?? 0).toBe(2);
     expect(remediate.match(/^\s+runner_ref: \$\{\{ needs\.check\.outputs\.runner_ref \}\}$/gm)?.length ?? 0).toBe(2);
@@ -80,8 +91,8 @@ test('a branch whose pull request already merged or closed is recreated rather t
     // and main. Only a branch with no finished pull request behind it is resumed.
     const check = job('check');
 
-    expect(check).toContain("gh pr list --head \"${{ inputs.branch }}\" --state closed");
-    expect(check).toContain('git push origin --delete "${{ inputs.branch }}"');
+    expect(check).toContain('gh pr list --head "$BRANCH" --state closed');
+    expect(check).toContain('git push origin --delete "$BRANCH"');
     expect(check).toContain('existing=0');
     // The open check still comes first, so a branch with an open pull request is left alone.
     expect(check.indexOf('--state open')).toBeLessThan(check.indexOf('--state closed'));
@@ -112,20 +123,14 @@ test('a dispatch with no environment skips the pair and still opens the pull req
     expect(job('pull_request').match(/\n {4}if: (.*)\n/)?.[1]).not.toContain('needs.verify');
 });
 
-test('a re-run gets its own baseline identity', () => {
-    expect(remediate).toContain('run_id=remediation-${{ inputs.patch_id }}-${{ github.run_id }}-${{ github.run_attempt }}');
-});
-
 test('a pushed branch gets its pull request even when Phone Home cannot be reached', () => {
     expect(job('pull_request')).toContain('site-token.sh || true');
     expect(job('pull_request')).toContain("if: steps.pr.outputs.url != '' && env.PHONEHOME_TOKEN != ''");
 });
 
-test('the nested verification workflow names a ref that exists', () => {
-    // The plugin repository has no `main`; its default branch is `develop`, and this file is on a
-    // feature branch until it is released.
-    expect(remediate).not.toContain('site-verification.yml@main');
-    expect(remediate.match(/site-verification\.yml@feature\/verification-manifest-poc/g)?.length ?? 0).toBe(2);
+test('the nested verification workflow is taken from the remediation workflow commit', () => {
+    expect(remediate.match(/uses: \.\/\.github\/workflows\/site-verification\.yml/g)?.length ?? 0).toBe(2);
+    expect(remediate).not.toMatch(/site-verification\.yml@/);
 });
 
 test('every third-party action is pinned to a full commit SHA', () => {
@@ -141,6 +146,52 @@ test('every third-party action is pinned to a full commit SHA', () => {
                 continue;
             }
             expect(ref, `${ref} is not pinned to a commit SHA`).toMatch(/@[0-9a-f]{40}$/);
+        }
+    }
+});
+
+test('a comparison waits for the environment to be running the commit, whatever started it', () => {
+    // On the pilot the pair ran on the push to main and reported before the host had deployed it.
+    // The wait lives in the reusable workflow, so no caller can start a comparison without it.
+    expect(verification).toMatch(/if: inputs\.mode == 'compare'\n\s+uses: actions\/checkout@[0-9a-f]{40}.*\n\s+with:\n\s+ref: \$\{\{ inputs\.lock_ref \|\| github\.sha \}\}/);
+    expect(verification).toContain("PHV_EXPECT_LOCK: ${{ inputs.mode == 'compare' && format('../../../site/{0}', inputs.lock_path) || '' }}");
+    expect(verification).toContain('PHV_DEPLOY_TIMEOUT: ${{ inputs.deploy_timeout }}');
+    // The remediation's own comparison is of the branch, not of the commit the dispatch ran on.
+    expect(job('verify')).toContain('lock_ref: ${{ inputs.branch }}');
+});
+
+test('a re-run updates the open pull request rather than failing to open a second', () => {
+    const pullRequest = job('pull_request');
+
+    expect(pullRequest).toContain('bash runner/tools/site-verification/ci/open-pr.sh');
+    expect(pullRequest).not.toContain('gh pr create');
+    // Phone Home is told the URL the script published, whichever of the two it was.
+    expect(pullRequest).toContain('PR_URL: ${{ steps.pr.outputs.url }}');
+    expect(pullRequest).toContain('{pull_request_url: $url, site_id: $site_id}');
+});
+
+test('a re-run of a run redoes the verification even though its pull request is open', () => {
+    // A new dispatch still leaves an open pull request alone. Without the attempt check, "Re-run all
+    // jobs" found the pull request the first attempt opened and skipped every job.
+    const check = job('check');
+
+    expect(check).toContain('if [ "${open:-0}" -gt 0 ] && [ "$RUN_ATTEMPT" = "1" ]; then');
+    expect(check.indexOf('$RUN_ATTEMPT" = "1"')).toBeLessThan(check.indexOf('--state closed'));
+});
+
+test('caller input is passed through the environment instead of inserted into shell source', () => {
+    for (const workflow of [remediate, verification]) {
+        const lines = workflow.split('\n');
+        for (let index = 0; index < lines.length; index++) {
+            const run = lines[index].match(/^ {8}run: (.*)$/);
+            if (!run) continue;
+            let script = run[1];
+            if (script === '|') {
+                while (index + 1 < lines.length && (/^ {10}/.test(lines[index + 1]) || lines[index + 1] === '')) {
+                    script += `\n${lines[++index]}`;
+                }
+            }
+            expect(script).not.toContain('${{');
         }
     }
 });
