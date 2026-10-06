@@ -1,5 +1,13 @@
 # Release Notes for Craft Phone Home Plugin
 
+## [1.8.1] - Unreleased
+
+This release changes the shared remediation workflows and the example files a site copies. The plugin itself and its API are unchanged, so the API schema stays at 1.5.0.
+
+- A site that keeps its Craft application in a subdirectory, such as `src/`, can now be remediated. The shared `remediate.yml` takes a `working_directory` input and runs the Composer update, the lock file comparison and the commit of the lock file inside it, and the comparison waits for the lock file found there. A site that leaves the input at the repository root while its Composer files are elsewhere gets an error naming the input, rather than a lock file created at the root.
+- The example `remediate.yml` and `verify-on-deploy.yml` now call the shared workflows at the `1.8.1` tag instead of a placeholder, and show the one line a site in a subdirectory changes in each. A site whose callers still name `feature/verification-manifest-poc` should move them to this tag, because that branch is being retired.
+- The three workflow problems found in the 6 October pilot run were fixed in 1.8.0 and are unchanged here. A comparison waits for the environment to be running the deployed commit, a re-run updates the open pull request rather than failing to open a second one, and every attempt of a remediation has its own run id.
+
 ## [1.8.0] - 2026-10-06
 
 This release adds deployment verification and the workflows Phone Home uses to prepare and prove a security remediation. The API schema moves to 1.5.0, which adds the `verification` field and a `package_name` on each plugin; nothing existing is removed or renamed.
