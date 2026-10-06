@@ -195,3 +195,13 @@ test('caller input is passed through the environment instead of inserted into sh
         }
     }
 });
+
+test('the example callers pin the shared workflows to one release tag, never a branch', () => {
+    // The pilot's callers named the feature branch, which has since been released and deleted. A
+    // site copies these files, so what they reference is what a new site runs.
+    const examples = ['remediate.yml', 'verify-on-deploy.yml'].map((name) => readFileSync(new URL(`../../examples/${name}`, import.meta.url).pathname, 'utf8'));
+    const refs = examples.flatMap((text) => [...text.matchAll(/uses: zaengle\/craft-phonehome\/\.github\/workflows\/[a-z-]+\.yml@(\S+)/g)].map((match) => match[1]));
+
+    expect(refs).toHaveLength(3);
+    expect(new Set(refs)).toEqual(new Set(['1.8.1']));
+});
