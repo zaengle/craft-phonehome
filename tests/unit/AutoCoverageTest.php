@@ -259,4 +259,30 @@ class AutoCoverageTest extends TestCase
 
         $this->assertSame([], $this->verification->autoCover([]));
     }
+
+    public function testMalformedAutoCoverageOptionsProduceAnInvalidManifest(): void
+    {
+        foreach ([
+            ['autoCoverTemplates' => 'true'],
+            ['autoCoverTemplates' => true, 'pages' => 'about'],
+            ['autoCoverTemplates' => true, 'defaultAssert' => 'h1'],
+            ['autoCoverTemplates' => true, 'masks' => '.ticker'],
+            ['autoCoverTemplates' => true, 'pages' => null],
+        ] as $config) {
+            $manifest = $this->verification->manifestForConfig($config);
+
+            $this->assertTrue($manifest['enabled']);
+            $this->assertFalse($manifest['valid']);
+            $this->assertSame([], $manifest['pages']);
+            $this->assertNotEmpty($manifest['errors']);
+        }
+    }
+
+    public function testValidAutoCoverageConfigStillGeneratesAManifest(): void
+    {
+        $manifest = $this->verification->manifestForConfig(['autoCoverTemplates' => true, 'pages' => []]);
+
+        $this->assertTrue($manifest['valid']);
+        $this->assertCount(3, $manifest['pages']);
+    }
 }

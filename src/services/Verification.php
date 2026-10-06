@@ -82,10 +82,41 @@ class Verification extends Component
      */
     public function getManifest(): array
     {
-        $this->warnings = [];
+        return $this->configuredManifest(PhoneHome::$plugin->getSettings()->verification);
+    }
 
-        $raw = PhoneHome::$plugin->getSettings()->verification;
+    /**
+     * Validates option types before invoking automatic selection. A malformed config must yield
+     * an invalid manifest rather than a TypeError that takes down the entire monitoring report.
+     *
+     * @param array<mixed> $raw
+     * @return array{schema_version: int, supported: bool, enabled: bool, valid: bool, pages: list<array{id: string, path: string, assert: array{visible: string}, mask: list<string>}>, errors: list<string>, warnings: list<string>}
+     */
+    protected function configuredManifest(array $raw): array
+    {
+        $this->warnings = [];
+        $errors = [];
+
+        if (array_key_exists('autoCoverTemplates', $raw) && !is_bool($raw['autoCoverTemplates'])) {
+            $errors[] = 'verification.autoCoverTemplates must be a boolean.';
+        }
+
+        foreach (['defaultAssert', 'masks'] as $option) {
+            if (array_key_exists($option, $raw) && !is_array($raw[$option])) {
+                $errors[] = sprintf('verification.%s must be an array.', $option);
+            }
+        }
+
         $auto = ($raw['autoCoverTemplates'] ?? null) === true;
+
+        if ($auto && array_key_exists('pages', $raw) && (!is_array($raw['pages']) || !array_is_list($raw['pages']))) {
+            $errors[] = 'verification.pages must be a list of page definitions.';
+        }
+
+        if ($errors !== []) {
+            return $this->result(enabled: true, valid: false, pages: [], errors: $errors);
+        }
+
         $defaultAssert = $raw['defaultAssert'] ?? ['visible' => 'h1'];
         $masks = $raw['masks'] ?? [];
 
@@ -532,7 +563,7 @@ class Verification extends Component
             return [];
         }
 
-        $rows = $this->routableQuery(Table::SECTIONS_SITES, Table::ENTRIES, 'sectionId')
+        $rows = $this->liveEntriesQuery()
             ->innerJoin(['entrytypes' => Table::ENTRYTYPES], '[[entrytypes.id]] = [[el_type.typeId]]')
             ->select(['uri' => 'elements_sites.uri', 'template' => 'settings.template', 'typeHandle' => 'entrytypes.handle'])
             ->andWhere(['elements_sites.uri' => $uris])
@@ -567,7 +598,7 @@ class Verification extends Component
 
     private function countRoutableUris(): int
     {
-        return (int)$this->routableQuery(Table::SECTIONS_SITES, Table::ENTRIES, 'sectionId')->count('[[elements_sites.id]]')
+        return (int)$this->liveEntriesQuery()->count('[[elements_sites.id]]')
             + (int)$this->routableQuery(Table::CATEGORYGROUPS_SITES, Table::CATEGORIES, 'groupId')->count('[[elements_sites.id]]');
     }
 
@@ -582,11 +613,12 @@ class Verification extends Component
     {
         $covered = [];
         $unmatched = [];
+        $all = array_fill_keys(array_filter($templates, static fn(mixed $t): bool => is_string($t) && $t !== ''), true);
 
         foreach ($paths as $path) {
             $uri = $this->pathToUri($path);
 
-            if (isset($matched[$uri])) {
+            if (isset($matched[$uri], $all[$matched[$uri]])) {
                 $covered[$matched[$uri]] = true;
             } else {
                 // Not an error. A manifest may legitimately name a custom route or an element type
@@ -596,7 +628,6 @@ class Verification extends Component
             }
         }
 
-        $all = array_fill_keys(array_filter($templates, static fn(mixed $t): bool => is_string($t) && $t !== ''), true);
         $uncovered = array_keys(array_diff_key($all, $covered));
         sort($uncovered);
 

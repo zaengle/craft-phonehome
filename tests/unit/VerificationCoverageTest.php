@@ -143,4 +143,17 @@ class VerificationCoverageTest extends TestCase
         $this->assertSame(0, $summary['templates_covered']);
         $this->assertSame(['entries', 'categories'], $summary['scope']);
     }
+
+    public function testAnExpiredTargetCannotIncreaseCoverageBeyondTheLiveTargets(): void
+    {
+        $summary = $this->verification->summariseCoverage(
+            ['live.twig'],
+            ['live' => 'live.twig', 'expired' => 'expired.twig'],
+            ['/live', '/expired'],
+        );
+
+        $this->assertSame(1, $summary['templates_total']);
+        $this->assertSame(1, $summary['templates_covered']);
+        $this->assertSame(['/expired'], $summary['unmatched_paths']);
+    }
 }

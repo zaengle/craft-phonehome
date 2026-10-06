@@ -116,26 +116,29 @@ jobs:
         id: branch
         env:
           GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ inputs.branch }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           existing=0
-          if git ls-remote --exit-code --heads origin "${{ inputs.branch }}" >/dev/null 2>&1; then
+          git check-ref-format --branch "$BRANCH" >/dev/null
+          if git ls-remote --exit-code --heads origin "refs/heads/$BRANCH" >/dev/null 2>&1; then
             existing=1
           fi
 
-          open="$(gh pr list --head "${{ inputs.branch }}" --state open --json number --jq 'length')"
-          if [ "${open:-0}" -gt 0 ] && [ "${{ github.run_attempt }}" = "1" ]; then
-            echo "::notice::A pull request for ${{ inputs.branch }} is already open; nothing to prepare."
+          open="$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')"
+          if [ "${open:-0}" -gt 0 ] && [ "$RUN_ATTEMPT" = "1" ]; then
+            echo "::notice::A pull request for $BRANCH is already open; nothing to prepare."
             echo "has_pr=1" >> "$GITHUB_OUTPUT"
           elif [ "${open:-0}" -gt 0 ]; then
-            echo "::notice::This is attempt ${{ github.run_attempt }} of the run, so the verification is redone and the open pull request for ${{ inputs.branch }} is updated with its verdict."
+            echo "::notice::This is attempt $RUN_ATTEMPT of the run, so the verification is redone and the open pull request for $BRANCH is updated with its verdict."
             echo "has_pr=0" >> "$GITHUB_OUTPUT"
           else
             echo "has_pr=0" >> "$GITHUB_OUTPUT"
 
-            finished="$(gh pr list --head "${{ inputs.branch }}" --state closed --json number --jq 'length')"
+            finished="$(gh pr list --head "$BRANCH" --state closed --json number --jq 'length')"
             if [ "$existing" = "1" ] && [ "${finished:-0}" -gt 0 ]; then
-              echo "::notice::${{ inputs.branch }} is left over from a pull request that was already merged or closed; deleting it and preparing afresh."
-              git push origin --delete "${{ inputs.branch }}"
+              echo "::notice::$BRANCH is left over from a pull request that was already merged or closed; deleting it and preparing afresh."
+              git push origin --delete "$BRANCH"
               existing=0
             fi
           fi
@@ -147,7 +150,9 @@ jobs:
       # the `job` context is not available where a reusable workflow is called with inputs.
       - name: Pin the runner
         id: run
-        run: echo "runner_ref=${{ inputs.runner_ref || job.workflow_sha }}" >> "$GITHUB_OUTPUT"
+        env:
+          RUNNER_REF: ${{ inputs.runner_ref || job.workflow_sha }}
+        run: echo "runner_ref=$RUNNER_REF" >> "$GITHUB_OUTPUT"
 
   # Freezes the verification environment before anything touches it.
   #
@@ -159,15 +164,12 @@ jobs:
   # id, and is inconclusive with a reason saying to use "Re-run all jobs"; reusing an earlier
   # attempt's capture is what the id exists to prevent.
   #
-  # The wrapper workflow below names a fixed ref because a `uses:` ref cannot be an expression.
-  # It is the feature branch until this is released, and the release moves it to the tag in the
-  # same change that moves the examples. The runner it checks out is pinned to this file's own
-  # commit, so the code that renders and compares is exactly the code released alongside this
-  # workflow; only the thin wrapper floats, and its inputs are kept backward compatible for that.
+  # A local reusable-workflow reference resolves at this workflow's own commit, so the wrapper
+  # and the runner stay together when a calling site pins a release.
   baseline:
     needs: check
     if: needs.check.outputs.has_pr == '0' && inputs.verify_origin != ''
-    uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@feature/verification-manifest-poc
+    uses: ./.github/workflows/site-verification.yml
     with:
       mode: capture
       run_id: remediation-${{ inputs.patch_id }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -199,8 +201,11 @@ jobs:
         id: resolve
         env:
           COMPOSER_AUTH: ${{ secrets.composer_auth }}
+          BRANCH: ${{ inputs.branch }}
+          PACKAGE: ${{ inputs.package }}
+          VERSION: ${{ inputs.version }}
         run: |
-          git switch -c "${{ inputs.branch }}"
+          git switch -c "$BRANCH"
           cp composer.lock composer.lock.before
 
           # --with-all-dependencies, because a Craft plugin security release frequently cannot move
@@ -209,7 +214,7 @@ jobs:
           # the root constraint; when it does not, this fails here, before anything is pushed, and
           # the constraint is the thing a person has to change. What moves is reported rather than
           # assumed to be small.
-          composer update "${{ inputs.package }}:${{ inputs.version }}" --with-all-dependencies --no-interaction --no-scripts
+          composer update "$PACKAGE:$VERSION" --with-all-dependencies --no-interaction --no-scripts
 
           # shellcheck disable=SC2016
           moved="$(php -r '
@@ -232,12 +237,17 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Push the branch
+        env:
+          BRANCH: ${{ inputs.branch }}
+          PACKAGE: ${{ inputs.package }}
+          VERSION: ${{ inputs.version }}
+          PATCH_ID: ${{ inputs.patch_id }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add composer.lock composer.json
-          git commit -m "Security: ${{ inputs.package }} to ${{ inputs.version }} (patch #${{ inputs.patch_id }})"
-          git push --set-upstream origin "${{ inputs.branch }}"
+          git commit -m "Security: $PACKAGE to $VERSION (patch #$PATCH_ID)"
+          git push --set-upstream origin "$BRANCH"
 
   # Waits for the baseline as well as the branch: the environment must be frozen before the branch
   # lands on it, or the comparison is held against a reference that already contains the change.
@@ -249,7 +259,7 @@ jobs:
   # succeeded, so the pull request can say whether the comparison rendered this change at all.
   deploy:
     needs: [check, prepare, baseline]
-    if: always() && needs.check.outputs.has_pr == '0' && needs.baseline.result == 'success' && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
+    if: always() && needs.check.outputs.has_pr == '0' && needs.baseline.result == 'success' && needs.baseline.outputs.overall == 'passed' && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
     runs-on: ubuntu-latest
     outputs:
       deployed: ${{ steps.deploy.outputs.deployed }}
@@ -278,8 +288,8 @@ jobs:
   # comparison that finds it unchanged is inconclusive rather than a pass about the old code.
   verify:
     needs: [check, baseline, prepare, deploy]
-    if: always() && needs.check.outputs.has_pr == '0' && needs.baseline.outputs.overall == 'passed' && needs.deploy.result == 'success'
-    uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@feature/verification-manifest-poc
+    if: always() && needs.check.outputs.has_pr == '0' && needs.baseline.outputs.overall == 'passed' && needs.deploy.result == 'success' && needs.deploy.outputs.deployed == '1'
+    uses: ./.github/workflows/site-verification.yml
     with:
       mode: compare
       run_id: remediation-${{ inputs.patch_id }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -339,10 +349,15 @@ jobs:
       # silent omission, so the fetch is allowed to fail here and the script handles the gap.
       - name: Read the assessment behind the patch
         id: context
+        env:
+          DASHBOARD_ORIGIN: ${{ inputs.dashboard_origin }}
+          PATCH_ID: ${{ inputs.patch_id }}
+          SITE_ID: ${{ inputs.site_id }}
         run: |
           context=""
           if [ -n "${PHONEHOME_TOKEN}" ]; then
-            context="$(curl -sS --fail-with-body --max-time 30 "${{ inputs.dashboard_origin }}/api/patches/${{ inputs.patch_id }}/remediation-context?site_id=${{ inputs.site_id }}" \
+            context="$(curl -sS --fail-with-body --max-time 30 --get "$DASHBOARD_ORIGIN/api/patches/$PATCH_ID/remediation-context" \
+              --data-urlencode "site_id=$SITE_ID" \
               -H "X-Auth-Token: ${PHONEHOME_TOKEN}" -H 'Accept: application/json' 2>/dev/null || true)"
           fi
           {
@@ -387,9 +402,15 @@ jobs:
 
       - name: Tell Phone Home where the pull request is
         if: steps.pr.outputs.url != '' && env.PHONEHOME_TOKEN != ''
+        env:
+          DASHBOARD_ORIGIN: ${{ inputs.dashboard_origin }}
+          PATCH_ID: ${{ inputs.patch_id }}
+          SITE_ID: ${{ inputs.site_id }}
+          PR_URL: ${{ steps.pr.outputs.url }}
         run: |
-          curl -sS --fail-with-body --max-time 30 -X POST "${{ inputs.dashboard_origin }}/api/patches/${{ inputs.patch_id }}/remediation" \
+          body="$(jq -n --arg url "$PR_URL" --arg site_id "$SITE_ID" '{pull_request_url: $url, site_id: $site_id}')"
+          curl -sS --fail-with-body --max-time 30 -X POST "$DASHBOARD_ORIGIN/api/patches/$PATCH_ID/remediation" \
             -H "X-Auth-Token: ${PHONEHOME_TOKEN}" \
             -H 'Content-Type: application/json' \
             -H 'Accept: application/json' \
-            -d "{\"pull_request_url\":\"${{ steps.pr.outputs.url }}\",\"site_id\":\"${{ inputs.site_id }}\"}"
+            -d "$body"

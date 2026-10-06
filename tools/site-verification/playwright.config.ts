@@ -32,6 +32,8 @@ import { notDeployedAbort, readLockFile, waitForLock } from './src/deployed';
 const config = runConfig();
 const paths = bundlePaths(config.bundleDir);
 const VIEWPORT = { width: 1440, height: 900 };
+// Staging's credentials also protect its API, but must not be sent to a separate API host.
+const apiBasicAuth = new URL(config.apiOrigin).origin === new URL(config.origin).origin ? config.basicAuth : null;
 
 // Playwright evaluates this config file again in every worker, so each of these side effects would
 // otherwise run twice: two API fetches, and a second rewrite of the frozen manifest from a later
@@ -117,8 +119,9 @@ async function prepareCapture(): Promise<void> {
     rmSync(paths.manifest, { force: true });
     rmSync(paths.drift, { force: true });
     rmSync(paths.environment, { force: true });
+    rmSync(`${config.bundleDir}/baseline-unstored.txt`, { force: true });
 
-    const report = await fetchReport(config.apiOrigin, config.token, config.insecureTls);
+    const report = await fetchReport(config.apiOrigin, config.token, config.insecureTls, apiBasicAuth);
 
     if (isAbort(report)) {
         writeBundle(config.bundleDir, report);
@@ -183,7 +186,7 @@ async function prepareCompare(): Promise<void> {
     // Confirm the site is actually answering before any page result is believed. A host that has
     // gone away can still serve a router's 404 for every path, which reads as a page-by-page
     // failure when it is really an inability to verify anything at all.
-    const current = await fetchReport(config.apiOrigin, config.token, config.insecureTls);
+    const current = await fetchReport(config.apiOrigin, config.token, config.insecureTls, apiBasicAuth);
 
     if (isAbort(current)) {
         writeBundle(config.bundleDir, current);
@@ -242,7 +245,7 @@ async function waitForDeploy(lockPath: string): Promise<boolean> {
     const outcome = await waitForLock(
         lock,
         async () => {
-            const report = await fetchReport(config.apiOrigin, config.token, config.insecureTls);
+            const report = await fetchReport(config.apiOrigin, config.token, config.insecureTls, apiBasicAuth);
 
             return isAbort(report) ? `${report.reason}: ${report.detail.join(' ')}` : readPackages(report.payload);
         },
@@ -324,4 +327,3 @@ export default defineConfig({
     },
     projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
 });
-

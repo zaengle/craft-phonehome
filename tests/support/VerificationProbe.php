@@ -39,6 +39,11 @@ class VerificationProbe extends Verification
         return $this->withAutoCoverage($explicit, $defaultAssert, $masks);
     }
 
+    public function manifestForConfig(array $raw): array
+    {
+        return $this->configuredManifest($raw);
+    }
+
     /** @return list<string> */
     public function reportedWarnings(): array
     {

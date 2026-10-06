@@ -129,9 +129,9 @@ Note that **CI captures its own baselines**. A baseline taken on an Apple Silico
 bundles are for local work.
 
 If the environment sits behind HTTP basic auth — staging commonly does — set `PHV_BASIC_AUTH_USER`
-and `PHV_BASIC_AUTH_PASS`. Without them the runner photographs the browser's own auth prompt and
-reports a missing required element on every page, which is a `failed` that says nothing about the
-deploy.
+and `PHV_BASIC_AUTH_PASS`. These credentials cover the browser and the plugin API when it is on the
+same origin. A separate `PHV_API_ORIGIN` receives only the Phone Home token. Without credentials a
+protected API makes the run inconclusive, and protected pages cannot be verified.
 
 ## Outcomes
 

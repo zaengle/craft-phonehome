@@ -44,6 +44,11 @@ test('the comparison only runs against a baseline whose capture passed', () => {
 
 test('the comparison only runs after the deploy succeeded', () => {
     expect(verifyCondition).toContain("needs.deploy.result == 'success'");
+    expect(verifyCondition).toContain("needs.deploy.outputs.deployed == '1'");
+});
+
+test('the deploy requires a sealed baseline stored on Phone Home', () => {
+    expect(job('deploy')).toContain("needs.baseline.outputs.overall == 'passed'");
 });
 
 test('the comparison expects the site to have changed', () => {
@@ -61,7 +66,8 @@ test('the pull request is opened whatever the verification concluded, as long as
 test('the runner follows the workflow file it was released with', () => {
     // `job.workflow_sha` is the documented context; `github.job_workflow_sha` does not exist and
     // an earlier version of this file asserted it into place.
-    expect(remediate).toContain('runner_ref=${{ inputs.runner_ref || job.workflow_sha }}');
+    expect(remediate).toContain('RUNNER_REF: ${{ inputs.runner_ref || job.workflow_sha }}');
+    expect(remediate).toContain('runner_ref=$RUNNER_REF');
     expect(remediate).not.toContain('job_workflow_sha');
     expect(remediate.match(/^\s+ref: \$\{\{ needs\.check\.outputs\.runner_ref \}\}$/gm)?.length ?? 0).toBe(2);
     expect(remediate.match(/^\s+runner_ref: \$\{\{ needs\.check\.outputs\.runner_ref \}\}$/gm)?.length ?? 0).toBe(2);
@@ -85,8 +91,8 @@ test('a branch whose pull request already merged or closed is recreated rather t
     // and main. Only a branch with no finished pull request behind it is resumed.
     const check = job('check');
 
-    expect(check).toContain("gh pr list --head \"${{ inputs.branch }}\" --state closed");
-    expect(check).toContain('git push origin --delete "${{ inputs.branch }}"');
+    expect(check).toContain('gh pr list --head "$BRANCH" --state closed');
+    expect(check).toContain('git push origin --delete "$BRANCH"');
     expect(check).toContain('existing=0');
     // The open check still comes first, so a branch with an open pull request is left alone.
     expect(check.indexOf('--state open')).toBeLessThan(check.indexOf('--state closed'));
@@ -122,11 +128,9 @@ test('a pushed branch gets its pull request even when Phone Home cannot be reach
     expect(job('pull_request')).toContain("if: steps.pr.outputs.url != '' && env.PHONEHOME_TOKEN != ''");
 });
 
-test('the nested verification workflow names a ref that exists', () => {
-    // The plugin repository has no `main`; its default branch is `develop`, and this file is on a
-    // feature branch until it is released.
-    expect(remediate).not.toContain('site-verification.yml@main');
-    expect(remediate.match(/site-verification\.yml@feature\/verification-manifest-poc/g)?.length ?? 0).toBe(2);
+test('the nested verification workflow is taken from the remediation workflow commit', () => {
+    expect(remediate.match(/uses: \.\/\.github\/workflows\/site-verification\.yml/g)?.length ?? 0).toBe(2);
+    expect(remediate).not.toMatch(/site-verification\.yml@/);
 });
 
 test('every third-party action is pinned to a full commit SHA', () => {
@@ -162,7 +166,8 @@ test('a re-run updates the open pull request rather than failing to open a secon
     expect(pullRequest).toContain('bash runner/tools/site-verification/ci/open-pr.sh');
     expect(pullRequest).not.toContain('gh pr create');
     // Phone Home is told the URL the script published, whichever of the two it was.
-    expect(pullRequest).toContain('"pull_request_url\\":\\"${{ steps.pr.outputs.url }}');
+    expect(pullRequest).toContain('PR_URL: ${{ steps.pr.outputs.url }}');
+    expect(pullRequest).toContain('{pull_request_url: $url, site_id: $site_id}');
 });
 
 test('a re-run of a run redoes the verification even though its pull request is open', () => {
@@ -170,6 +175,23 @@ test('a re-run of a run redoes the verification even though its pull request is 
     // jobs" found the pull request the first attempt opened and skipped every job.
     const check = job('check');
 
-    expect(check).toContain('if [ "${open:-0}" -gt 0 ] && [ "${{ github.run_attempt }}" = "1" ]; then');
-    expect(check.indexOf('github.run_attempt }}" = "1"')).toBeLessThan(check.indexOf('--state closed'));
+    expect(check).toContain('if [ "${open:-0}" -gt 0 ] && [ "$RUN_ATTEMPT" = "1" ]; then');
+    expect(check.indexOf('$RUN_ATTEMPT" = "1"')).toBeLessThan(check.indexOf('--state closed'));
+});
+
+test('caller input is passed through the environment instead of inserted into shell source', () => {
+    for (const workflow of [remediate, verification]) {
+        const lines = workflow.split('\n');
+        for (let index = 0; index < lines.length; index++) {
+            const run = lines[index].match(/^ {8}run: (.*)$/);
+            if (!run) continue;
+            let script = run[1];
+            if (script === '|') {
+                while (index + 1 < lines.length && (/^ {10}/.test(lines[index + 1]) || lines[index + 1] === '')) {
+                    script += `\n${lines[++index]}`;
+                }
+            }
+            expect(script).not.toContain('${{');
+        }
+    }
 });

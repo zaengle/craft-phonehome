@@ -12,6 +12,9 @@ This release adds deployment verification and the workflows Phone Home uses to p
 - A re-run of a remediation now updates the draft pull request the first attempt opened instead of failing to open a second one, and "Re-run all jobs" redoes the verification rather than finding the open pull request and stopping.
 - Every attempt of a remediation now has its own run id. A re-run that repeats the comparison without the baseline is inconclusive and says to use "Re-run all jobs", rather than comparing against an earlier attempt's capture.
 - The example workflows reference `RELEASE_TAG_TO_FILL_IN`, which a site replaces with this release's tag or a later one.
+- Remediation deploys require a baseline stored on Phone Home, and comparisons require a confirmed deploy. Nested workflows follow the same release commit, and caller inputs are passed through environment variables rather than inserted into shell commands.
+- Staging basic-auth credentials also authenticate the plugin API on the same origin. Deployment checks tolerate older plugins reported by handle and require Craft's version to be reported.
+- Malformed automatic-coverage option types produce an invalid manifest instead of breaking the monitoring response. Expired and future-dated entries do not count toward live template coverage.
 
 ## [1.5.0] - 2026-08-20
 
