@@ -12,6 +12,8 @@
 #   ORIGIN                 The environment the change was verified against. Empty means the site
 #                          has none and the pull request was opened without verification.
 #   MOVED, COUNT           What Composer moved, one "name before -> after" per line, and how many.
+#   SCOPE, SCOPE_REASON    How far the update had to widen (exact, dependencies or all) and the
+#                          conflict that made it widen. Empty when this run did not resolve the change.
 #   CONTEXT                The remediation-context JSON from Phone Home, or empty if unreachable.
 #   BASELINE               The capture's outcome as the runner reported it.
 #   BASELINE_SUMMARY       One line on what the capture found.
@@ -25,7 +27,7 @@
 
 set -euo pipefail
 
-: "${PATCH_ID:=?}" "${ORIGIN:=}" "${MOVED:=}" "${COUNT:=0}" "${CONTEXT:=}"
+: "${PATCH_ID:=?}" "${ORIGIN:=}" "${MOVED:=}" "${COUNT:=0}" "${CONTEXT:=}" "${SCOPE:=}" "${SCOPE_REASON:=}"
 : "${BASELINE:=}" "${BASELINE_SUMMARY:=}" "${DEPLOYED:=}" "${DEPLOY_JOB:=}" "${DEPLOY_RUN_URL:=}"
 : "${VERIFY_JOB:=}" "${VERIFICATION:=}" "${VERIFICATION_SUMMARY:=}" "${ENVIRONMENT:=}"
 
@@ -55,6 +57,16 @@ if [ "${COUNT:-0}" -gt 10 ] 2>/dev/null; then
     scale="> [!WARNING]
 > This moves ${COUNT} packages. That is a dependency bump which happens to contain a security fix, not a security patch — review it as one."
 fi
+
+# How far the update had to reach, so a reviewer can tell what the release required from what moved
+# along with it. Each step is tried only when the narrower one could not be resolved.
+because="${SCOPE_REASON:+ Composer reported: ${SCOPE_REASON}}"
+case "$SCOPE" in
+    exact) resolved="Only the requested package was allowed to move." ;;
+    dependencies) resolved="Moving only the requested package could not be resolved, so its own dependencies were allowed to move as well, with the fewest changes Composer could make. No root requirement, such as Craft, was moved.${because}" ;;
+    all) resolved="Neither the requested package alone nor with its own dependencies could be resolved, so root requirements such as Craft were allowed to move too, with the fewest changes Composer could make.${because}" ;;
+    *) resolved="" ;;
+esac
 
 # One of four sentences, chosen from what actually happened. No environment at all comes first,
 # because it is a different kind of pull request rather than a verification that went wrong; then
@@ -104,6 +116,10 @@ else
     echo "This run used a branch an earlier run had already pushed, so what moved is in that branch's commit rather than repeated here."
 fi
 echo
+if [ -n "$resolved" ]; then
+    echo "$resolved"
+    echo
+fi
 echo "$verdict"
 echo
 # What the site itself reported moving. This, not the lock file, is the evidence that the change

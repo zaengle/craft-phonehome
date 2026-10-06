@@ -50,7 +50,7 @@ jobs:
     # A release tag, never a branch: the runner follows this file's commit, so this is the one thing
     # to pin. 1.8.1 is the earliest tag this file works with, because it is the first to accept
     # `working_directory`; move to a later one by changing this line.
-    uses: zaengle/craft-phonehome/.github/workflows/remediate.yml@1.8.1
+    uses: zaengle/craft-phonehome/.github/workflows/remediate.yml@1.8.2
     with:
       patch_id: ${{ inputs.patch_id }}
       site_id: ${{ inputs.site_id }}

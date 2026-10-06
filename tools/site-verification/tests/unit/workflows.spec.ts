@@ -208,7 +208,7 @@ test('the example callers pin the shared workflows to one release tag, never a b
     const refs = examples.flatMap((text) => [...text.matchAll(/uses: zaengle\/craft-phonehome\/\.github\/workflows\/[a-z-]+\.yml@(\S+)/g)].map((match) => match[1]));
 
     expect(refs).toHaveLength(3);
-    expect(new Set(refs)).toEqual(new Set(['1.8.1']));
+    expect(new Set(refs)).toEqual(new Set(['1.8.2']));
 });
 
 test('every step that touches composer.json or composer.lock runs inside working_directory', () => {
@@ -252,4 +252,11 @@ test('the lock file path is spelled so the comparison checkout can match it', ()
     for (const dir of ['src', 'src/', './src']) {
         expect(lockPath(dir)).toBe('lock_path=src/composer.lock\n');
     }
+});
+
+test('how far the Composer update reached is carried into the pull request body', () => {
+    expect(job('prepare')).toContain('scope: ${{ steps.resolve.outputs.scope }}');
+    expect(job('prepare')).toContain('scope_reason: ${{ steps.resolve.outputs.scope_reason }}');
+    expect(job('pull_request')).toContain('SCOPE: ${{ needs.prepare.outputs.scope }}');
+    expect(job('pull_request')).toContain('SCOPE_REASON: ${{ needs.prepare.outputs.scope_reason }}');
 });
