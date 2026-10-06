@@ -215,7 +215,9 @@ jobs:
           PHV_DEPLOY_TIMEOUT: ${{ inputs.deploy_timeout }}
           PHV_BASIC_AUTH_USER: ${{ secrets.basic_auth_user }}
           PHV_BASIC_AUTH_PASS: ${{ secrets.basic_auth_password }}
-        run: npm run --silent ${{ inputs.mode }}
+        run: |
+          case "$PHV_MODE" in capture|compare) ;; *) echo 'Invalid verification mode' >&2; exit 1 ;; esac
+          npm run --silent "$PHV_MODE"
 
       # The result is already in Phone Home by this point. This is for the person reading the failed
       # job, who should not have to open another tab to see what the run said.

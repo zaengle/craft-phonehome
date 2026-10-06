@@ -65,12 +65,12 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Lint the workflows
-        uses: docker://rhysd/actionlint:1.7.7
-        with:
-          # `job.workflow_sha` is a documented context (the commit of the workflow file defining the
-          # job) that this actionlint release does not know about yet; the runner pin depends on it.
-          args: -color -ignore 'property "workflow_sha" is not defined in object type'
-
+        # `job.workflow_sha` is a documented context that this actionlint release does not know
+        # about yet. Use a shell so the ignore pattern is passed as one argument: Docker action
+        # `with.args` does not interpret shell single quotes.
+        run: |
+          docker run --rm --volume "$PWD:/repo:ro" --workdir /repo rhysd/actionlint:1.7.7 \
+            -color -ignore 'property "workflow_sha" is not defined in object type'
 
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4

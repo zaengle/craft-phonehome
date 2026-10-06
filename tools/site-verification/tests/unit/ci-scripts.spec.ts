@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -10,6 +10,51 @@ import { join } from 'node:path';
  * distinguish is pinned here rather than discovered on a real run.
  */
 const ci = new URL('../../ci', import.meta.url).pathname;
+
+test('the CI linter receives the whole ignore pattern as one argument', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'phv-actionlint-'));
+    const calls = join(dir, 'calls');
+    writeFileSync(join(dir, 'docker'), `#!/usr/bin/env node
+require('fs').writeFileSync(process.env.CALLS, JSON.stringify(process.argv.slice(2)));
+`, { mode: 0o755 });
+    const workflow = readFileSync(new URL('../../../../.github/workflows/tests.yml', import.meta.url), 'utf8');
+    const step = workflow.split('      - name: Lint the workflows\n')[1].split('      - name: Set up Node\n')[0];
+    expect(step).toContain('        run: |\n');
+    const script = step.split('        run: |\n')[1].split('\n').map((line) => line.replace(/^ {10}/, '')).join('\n');
+    const run = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', script], {
+        cwd: dir,
+        env: { PATH: `${dir}:${process.env.PATH ?? ''}`, CALLS: calls },
+        encoding: 'utf8',
+    });
+
+    expect(run.status, run.stderr).toBe(0);
+    const args = JSON.parse(readFileSync(calls, 'utf8')) as string[];
+    expect(args.slice(args.indexOf('-ignore'))).toEqual(['-ignore', 'property "workflow_sha" is not defined in object type']);
+});
+
+test('the workflow treats shell syntax in remediation inputs as literal commit arguments', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'phv-input-'));
+    const marker = join(dir, 'executed');
+    const calls = join(dir, 'calls');
+    writeFileSync(join(dir, 'git'), `#!/usr/bin/env node
+require('fs').appendFileSync(process.env.CALLS, JSON.stringify(process.argv.slice(2)) + '\\n');
+`, { mode: 0o755 });
+    const workflow = readFileSync(new URL('../../../../.github/workflows/remediate.yml', import.meta.url), 'utf8');
+    const step = workflow.split('      - name: Push the branch\n')[1].split('\n  # Waits for the baseline')[0];
+    const script = step.split('        run: |\n')[1].split('\n').map((line) => line.replace(/^ {10}/, '')).join('\n');
+    const version = `5.8.15 $(touch "${marker}")`;
+    const run = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', script], {
+        cwd: dir,
+        env: { PATH: `${dir}:${process.env.PATH ?? ''}`, CALLS: calls, BRANCH: 'security/patch-1', PACKAGE: 'craftcms/cms', VERSION: version, PATCH_ID: '1' },
+        encoding: 'utf8',
+    });
+
+    expect(run.status, run.stderr).toBe(0);
+    expect(existsSync(marker)).toBe(false);
+    expect(readFileSync(calls, 'utf8').trim().split('\n').map((line) => JSON.parse(line))).toContainEqual([
+        'commit', '-m', `Security: craftcms/cms to ${version} (patch #1)`,
+    ]);
+});
 
 function prBody(env: Record<string, string>): string {
     const run = spawnSync('bash', [join(ci, 'pr-body.sh')], {

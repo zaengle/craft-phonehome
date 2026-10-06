@@ -47,6 +47,16 @@ test.describe('lockMismatches', () => {
         expect(lockMismatches(lock, { 'craftcms/cms': '5.8.15', 'verbb/formie': '3.0.4' })).toEqual([]);
     });
 
+    test('older plugins reported by handle do not block a matching Craft deployment', () => {
+        expect(lockMismatches(lock, { 'craftcms/cms': '5.8.15', formie: '3.0.4' })).toEqual([]);
+    });
+
+    test('a report missing Craft cannot prove that the lock file is deployed', () => {
+        expect(lockMismatches(lock, { 'verbb/formie': '3.0.4' })).toEqual([
+            { name: 'craftcms/cms', wanted: '5.8.15', reported: null },
+        ]);
+    });
+
     test('names a package at the wrong version, and one the commit removed', () => {
         expect(lockMismatches(lock, { 'craftcms/cms': '5.8.14', 'old/plugin': '1.0.0' })).toEqual([
             { name: 'craftcms/cms', wanted: '5.8.15', reported: '5.8.14' },

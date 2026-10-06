@@ -68,10 +68,16 @@ const normalise = (version: string) => version.replace(/^v(?=\d)/i, '');
  * always compared.
  */
 export function lockMismatches(lock: Record<string, string>, reported: Record<string, string>): LockMismatch[] {
-    return Object.keys(reported)
+    // A handle from an older plugin API cannot be looked up in a Composer lock file. Craft is
+    // mandatory evidence even if a malformed report omitted it; other Composer names are
+    // compared when reported, including packages removed from the lock file.
+    const names = new Set(Object.keys(reported).filter((name) => name.includes('/')));
+    if (lock['craftcms/cms'] !== undefined) names.add('craftcms/cms');
+
+    return [...names]
         .sort()
-        .filter((name) => lock[name] === undefined || normalise(lock[name]) !== normalise(reported[name]))
-        .map((name) => ({ name, wanted: lock[name] ?? null, reported: reported[name] }));
+        .filter((name) => lock[name] === undefined || reported[name] === undefined || normalise(lock[name]) !== normalise(reported[name]))
+        .map((name) => ({ name, wanted: lock[name] ?? null, reported: reported[name] ?? null }));
 }
 
 export type WaitOutcome =
