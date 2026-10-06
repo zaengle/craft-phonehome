@@ -73,10 +73,9 @@ jobs:
 
   baseline:
     needs: pair
-    # Replace RELEASE_TAG_TO_FILL_IN here and in `verify` with the plugin release tag this site
-    # should run, 1.8.0 or later; 1.8.0 is the first release that carries these workflows. A tag,
-    # never a branch: the runner follows this file's commit, so this is the one thing to pin.
-    uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@RELEASE_TAG_TO_FILL_IN
+    # A release tag, never a branch: the runner follows this file's commit, so this is the one thing
+    # to pin. Use the same tag here and in `verify`, and the same one the site's remediate.yml uses.
+    uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@1.8.1
     with:
       mode: capture
       run_id: ${{ needs.pair.outputs.run_id }}
@@ -95,9 +94,13 @@ jobs:
 
   verify:
     needs: [pair, deploy]
-    uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@RELEASE_TAG_TO_FILL_IN # the same tag as `baseline`
+    uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@1.8.1 # the same tag as `baseline`
     with:
       mode: compare
+      # The lock file the comparison waits for the environment to report. Change it to
+      # 'src/composer.lock', or wherever it lives, when this site keeps its Craft application in a
+      # subdirectory rather than at the repository root.
+      lock_path: composer.lock
       run_id: ${{ needs.pair.outputs.run_id }}
       origin: https://staging.example.com
       dashboard_origin: https://phone-home.example.com
