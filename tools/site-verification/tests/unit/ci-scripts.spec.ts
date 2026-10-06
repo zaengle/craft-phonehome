@@ -11,6 +11,27 @@ import { join } from 'node:path';
  */
 const ci = new URL('../../ci', import.meta.url).pathname;
 
+test('the CI linter receives the whole ignore pattern as one argument', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'phv-actionlint-'));
+    const calls = join(dir, 'calls');
+    writeFileSync(join(dir, 'docker'), `#!/usr/bin/env node
+require('fs').writeFileSync(process.env.CALLS, JSON.stringify(process.argv.slice(2)));
+`, { mode: 0o755 });
+    const workflow = readFileSync(new URL('../../../../.github/workflows/tests.yml', import.meta.url), 'utf8');
+    const step = workflow.split('      - name: Lint the workflows\n')[1].split('      - name: Set up Node\n')[0];
+    expect(step).toContain('        run: |\n');
+    const script = step.split('        run: |\n')[1].split('\n').map((line) => line.replace(/^ {10}/, '')).join('\n');
+    const run = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', script], {
+        cwd: dir,
+        env: { PATH: `${dir}:${process.env.PATH ?? ''}`, CALLS: calls },
+        encoding: 'utf8',
+    });
+
+    expect(run.status, run.stderr).toBe(0);
+    const args = JSON.parse(readFileSync(calls, 'utf8')) as string[];
+    expect(args.slice(args.indexOf('-ignore'))).toEqual(['-ignore', 'property "workflow_sha" is not defined in object type']);
+});
+
 test('the workflow treats shell syntax in remediation inputs as literal commit arguments', () => {
     const dir = mkdtempSync(join(tmpdir(), 'phv-input-'));
     const marker = join(dir, 'executed');
