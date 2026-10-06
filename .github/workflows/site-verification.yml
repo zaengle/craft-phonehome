@@ -1,0 +1,230 @@
+# Deployment verification for a Craft site running the Phone Home plugin.
+#
+# Called from a site's own repository around its existing deploy: capture a baseline, deploy, then
+# compare against the frozen copy. Nothing here deploys anything, and nothing here needs write
+# access to the calling repository.
+#
+# The baseline lives in Phone Home rather than on the runner, so the two halves need not share a
+# machine — which they cannot, since each job gets a fresh one.
+name: Site verification
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: 'capture to freeze a baseline, compare to check against one.'
+        required: true
+        type: string
+      run_id:
+        description: >-
+          Identifies the bundle. Both halves of a pair must use the same value, and it must be new
+          for each pair — the commit SHA is the obvious choice. Reusing one is refused rather than
+          allowed to silently replace a reference somebody has already read.
+        required: true
+        type: string
+      origin:
+        description: 'The site to render, e.g. https://staging.example.com.'
+        required: true
+        type: string
+      api_origin:
+        description: 'Where the Phone Home plugin API lives, if not the same host as the site.'
+        required: false
+        type: string
+        default: ''
+      dashboard_origin:
+        description: 'The Phone Home instance results are reported to.'
+        required: true
+        type: string
+      patch_id:
+        description: 'The Phone Home patch this run is verifying, if it is verifying one.'
+        required: false
+        type: string
+        default: ''
+      full_page:
+        description: >-
+          Capture the whole scrollable document instead of the viewport. Off by default, because
+          scroll-driven animation makes real pages tens of thousands of pixels tall and a full-page
+          capture of one can kill the browser.
+        required: false
+        type: boolean
+        default: false
+      expect_change:
+        description: >-
+          For a compare that follows a deploy: the site is expected to report different Craft or
+          plugin versions than at baseline. When it reports the same ones the change never reached
+          it, and the run is inconclusive rather than a pass about the old code.
+        required: false
+        type: boolean
+        default: false
+      expect_package:
+        description: >-
+          With expect_change: the Composer package (or plugin handle) the deploy should have moved.
+          The site must report it at expect_version, or the run is inconclusive; any other package
+          moving is not evidence that this one did.
+        required: false
+        type: string
+        default: ''
+      expect_version:
+        description: 'With expect_package: the version the site must now report it at.'
+        required: false
+        type: string
+        default: ''
+      lock_ref:
+        description: >-
+          For a compare: the commit the environment should now be running. Before the after side
+          is captured the runner waits until the environment reports the versions that commit's
+          composer.lock records, and ends inconclusive if it never does. Empty means the commit
+          that started the calling workflow, which is right for a push or a deployment_status
+          event. A caller started any other way names the deployed commit here.
+        required: false
+        type: string
+        default: ''
+      lock_path:
+        description: 'Where composer.lock sits in the calling repository.'
+        required: false
+        type: string
+        default: 'composer.lock'
+      deploy_timeout:
+        description: >-
+          For a compare: how many seconds to wait for the environment to be running lock_ref
+          before giving up as inconclusive.
+        required: false
+        type: number
+        default: 900
+      runner_ref:
+        description: >-
+          Which commit of this repository the runner is taken from. Empty means the commit this
+          workflow file was read from, so a site that pins `site-verification.yml@<tag>` has pinned
+          the runner with it. A caller that is itself a reusable workflow passes its own commit,
+          because this file is then read from a ref it did not choose.
+        required: false
+        type: string
+        default: ''
+    secrets:
+      phonehome_token:
+        description: >-
+          The site's Phone Home token. Optional: a job with `id-token: write` proves its identity
+          to Phone Home and is handed the linked site's token instead, so a repository Phone Home
+          knows about need not hold one. Also authenticates to the dashboard.
+        required: false
+      basic_auth_user:
+        description: 'HTTP basic username, if the environment sits behind one.'
+        required: false
+      basic_auth_password:
+        required: false
+    outputs:
+      overall:
+        description: >-
+          What the run concluded, as the runner reported it: passed, changes_detected, failed or
+          inconclusive. Empty when the run produced no result at all. A caller must read this
+          rather than the job's status, because a job's status only says whether the step exited
+          zero, and a caller that tolerates failure sees that as success either way.
+        value: ${{ jobs.verify.outputs.overall }}
+      summary:
+        description: 'One line on what the run found, for a caller that quotes it somewhere.'
+        value: ${{ jobs.verify.outputs.summary }}
+      environment:
+        description: >-
+          One line on what the site reports moved since the baseline, by version. Empty for a
+          capture. This is the evidence that a change reached the environment; a lock file moving
+          on a branch is not.
+        value: ${{ jobs.verify.outputs.environment }}
+
+# `id-token: write` is what lets a run prove its identity to Phone Home in place of a secret. The
+# calling workflow has to grant it too; without it the token step falls back to the secret.
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      overall: ${{ steps.summary.outputs.overall }}
+      summary: ${{ steps.summary.outputs.summary }}
+      environment: ${{ steps.summary.outputs.environment }}
+
+    # Pinned to the same image the local DDEV service uses, and to the same Playwright version as
+    # the runner's package.json. A baseline records the browser, the browser revision and the
+    # platform that produced it, and a comparison against a different one is refused rather than
+    # reported — so this is not a convenience, it is the thing that makes the pair comparable.
+    #
+    # Note that a baseline captured on an Apple Silicon Mac is `linux-arm64` and will never match a
+    # GitHub runner's `linux-x64`. CI captures its own baselines; local ones are for local work.
+    container:
+      image: mcr.microsoft.com/playwright:v1.49.1-noble
+
+    steps:
+      - name: Check out the runner
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zaengle/craft-phonehome
+          # `job.workflow_sha` is the commit of the workflow file that defines this job, which for
+          # a reusable workflow is this file's own commit. It is available here, in a step, and not
+          # where a reusable workflow is called with inputs, which is why a calling workflow passes
+          # its own commit through `runner_ref` instead.
+          ref: ${{ inputs.runner_ref || job.workflow_sha }}
+          path: runner
+
+      # The lock file of the commit the comparison is about, and nothing else of the site. It is
+      # what the runner waits for the environment to report before it captures the after side, so
+      # a comparison started by a push cannot run against the environment the push has not reached.
+      - name: Check out the lock file the environment should be running
+        if: inputs.mode == 'compare'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.lock_ref || github.sha }}
+          path: site
+          sparse-checkout: ${{ inputs.lock_path }}
+          sparse-checkout-cone-mode: false
+
+      - name: Install the runner's dependencies
+        working-directory: runner/tools/site-verification
+        run: npm ci
+
+      # The secret when the repository holds one; otherwise the run proves who it is and Phone Home
+      # hands over the linked site's token. Masked so it cannot appear in a log either way.
+      - name: Obtain the site token
+        working-directory: runner/tools/site-verification
+        env:
+          PHV_TOKEN: ${{ secrets.phonehome_token }}
+          PHV_DASHBOARD_ORIGIN: ${{ inputs.dashboard_origin }}
+          PHV_ORIGIN: ${{ inputs.origin }}
+        run: |
+          token="$(bash ci/site-token.sh)"
+          echo "::add-mask::${token}"
+          echo "PHV_TOKEN=${token}" >> "$GITHUB_ENV"
+
+      - name: ${{ inputs.mode == 'capture' && 'Freeze a baseline' || 'Compare against the baseline' }}
+        working-directory: runner/tools/site-verification
+        env:
+          PHV_MODE: ${{ inputs.mode }}
+          PHV_RUN_ID: ${{ inputs.run_id }}
+          PHV_ORIGIN: ${{ inputs.origin }}
+          PHV_API_ORIGIN: ${{ inputs.api_origin }}
+          PHV_DASHBOARD_ORIGIN: ${{ inputs.dashboard_origin }}
+          PHV_PATCH_ID: ${{ inputs.patch_id }}
+          PHV_FULL_PAGE: ${{ inputs.full_page && '1' || '0' }}
+          PHV_EXPECT_CHANGE: ${{ inputs.expect_change && '1' || '0' }}
+          PHV_EXPECT_PACKAGE: ${{ inputs.expect_package }}
+          PHV_EXPECT_VERSION: ${{ inputs.expect_version }}
+          # Relative to this step's working directory. `github.workspace` would name the host's path,
+          # not the container's, inside a job that runs in a container.
+          PHV_EXPECT_LOCK: ${{ inputs.mode == 'compare' && format('../../../site/{0}', inputs.lock_path) || '' }}
+          PHV_EXPECT_LOCK_REF: ${{ inputs.lock_ref || github.sha }}
+          PHV_DEPLOY_TIMEOUT: ${{ inputs.deploy_timeout }}
+          PHV_BASIC_AUTH_USER: ${{ secrets.basic_auth_user }}
+          PHV_BASIC_AUTH_PASS: ${{ secrets.basic_auth_password }}
+        run: |
+          case "$PHV_MODE" in capture|compare) ;; *) echo 'Invalid verification mode' >&2; exit 1 ;; esac
+          npm run --silent "$PHV_MODE"
+
+      # The result is already in Phone Home by this point. This is for the person reading the failed
+      # job, who should not have to open another tab to see what the run said.
+      # The script lives in the runner (ci/summarise.mjs) and has its own tests, so what a job
+      # summary says and what a calling workflow is told come from code that ran before a job did.
+      - name: Summarise the outcome
+        id: summary
+        if: always()
+        working-directory: runner/tools/site-verification
+        run: node ci/summarise.mjs "$(find runs -name result.json -not -path '*/attempts/*' -print -quit 2>/dev/null || true)"

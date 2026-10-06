@@ -1,0 +1,52 @@
+# The deploy contract a site provides for remediation. Copy this into the site's repository as
+# .github/workflows/deploy-staging.yml, put the site's real deploy in the marked step, and name the
+# file in Phone Home as the site's deploy workflow.
+#
+# The contract is three sentences. It can be started by workflow_dispatch on any ref. It deploys
+# the ref it was started on to the staging environment Phone Home verifies against. It exits
+# non-zero if that did not happen, and it does not exit at all until it has.
+#
+# The last sentence is the one that gets missed. A deploy hook that answers 200 and then deploys in
+# the background satisfies the second sentence and breaks the third: the remediation workflow
+# would see this job succeed, compare staging before the change reached it, and report a clean
+# result about the old code. Wait for the deploy to finish, by whatever means the deploy provides.
+name: Deploy to staging
+
+on:
+  workflow_dispatch:
+
+# Nothing here needs to write to the repository.
+permissions:
+  contents: read
+
+concurrency:
+  # Two deploys to one environment at once leave it in neither state.
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Replace this step with the site's own deploy. Two shapes that satisfy the contract:
+      #
+      #   A deploy hook that is synchronous, or that reports completion somewhere this job can
+      #   poll — Envoyer and Forge both expose deployment status:
+      #
+      #     curl -sS --fail-with-body -X POST "$DEPLOY_HOOK" -d "ref=${GITHUB_REF_NAME}"
+      #     until [ "$(curl -sS "$STATUS_URL" | jq -r .status)" = "finished" ]; do sleep 10; done
+      #
+      #   A deploy this job performs itself over SSH, which is finished when the command returns:
+      #
+      #     ssh deploy@staging "cd /srv/site && git fetch && git checkout ${GITHUB_SHA} && composer install --no-dev && php craft up --interactive=0"
+      #
+      # Either way, failing here is the correct outcome when the deploy fails. The remediation
+      # workflow reads this job's result and will not compare against an environment that did not
+      # receive the change.
+      - name: Deploy ${{ github.ref_name }} to staging
+        run: |
+          echo "::error::This site has not wired in its deploy yet. Replace this step; see the comment above it."
+          exit 1

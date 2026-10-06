@@ -11,13 +11,17 @@ use yii\base\Event;
 use yii\base\Exception;
 use zaengle\phonehome\events\RegisterStatusChecksEvent;
 use zaengle\phonehome\models\Settings;
+use zaengle\phonehome\services\DatabaseExport;
 use zaengle\phonehome\services\Report;
+use zaengle\phonehome\services\Verification;
 use zaengle\phonehome\statuschecks\QueueStatusCheck;
 use zaengle\phonehome\traits\HasOwnLogFile;
 
 /**
  * @property  Settings $settings
+ * @property-read DatabaseExport $databaseExport
  * @property-read Report $report
+ * @property-read Verification $verification
  * @method    Settings getSettings()
  */
 class PhoneHome extends BasePlugin
@@ -64,6 +68,8 @@ class PhoneHome extends BasePlugin
 
         $this->attachEventHandlers();
 
+        $this->databaseExport->register();
+
         self::info('PhoneHome plugin initialized');
     }
 
@@ -71,7 +77,9 @@ class PhoneHome extends BasePlugin
     {
         return [
             'components' => [
+                'databaseExport' => DatabaseExport::class,
                 'report' => Report::class,
+                'verification' => Verification::class,
             ],
         ];
     }

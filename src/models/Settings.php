@@ -45,6 +45,25 @@ class Settings extends Model
     public array $additionalEnvKeys = [];
 
     /**
+     * @var array<mixed> Opt-in deployment-verification definitions, normalised by the Verification
+     * service before they reach the report. Left empty, the site reports verification as disabled.
+     */
+    public array $verification = [];
+
+    /**
+     * @var string[] Tables whose data `craft db/backup` should leave out. Exact names, with or
+     * without the table prefix, or Craft's `{{%name}}` tokens. The table's structure is still
+     * dumped, so it restores empty rather than missing.
+     */
+    public array $backupExcludeTables = [];
+
+    /**
+     * @var string[] Wildcard patterns selecting tables to leave out, where `*` matches any run of
+     * characters. Useful for form plugins, which spread submission data across per-form tables.
+     */
+    public array $backupExcludePatterns = [];
+
+    /**
      * @var string|null Directory holding the npm package.json, when it is not where the plugin would
      * otherwise find it. Absolute, or relative to `@root`. Accepts an `$ENV_VAR_NAME` reference.
      * Leave null to search for the manifest instead.

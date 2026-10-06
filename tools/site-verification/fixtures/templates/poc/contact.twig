@@ -1,0 +1,13 @@
+{% extends "poc/_layout" %}
+{% set title = "Contact" %}
+{% block content %}
+    <h1 data-testid="page-heading">Contact</h1>
+    <p>The form below is the required element for this page's assertion.</p>
+    <form data-testid="contact-form" method="post" action="/poc/contact">
+        <label for="name">Name</label>
+        <input id="name" name="name" type="text">
+        <label for="message">Message</label>
+        <textarea id="message" name="message" rows="4"></textarea>
+        <button type="submit">Send</button>
+    </form>
+{% endblock %}

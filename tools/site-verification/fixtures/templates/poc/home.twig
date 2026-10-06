@@ -1,0 +1,11 @@
+{% extends "poc/_layout" %}
+{% set title = "Home" %}
+{% block content %}
+    <h1 data-testid="page-heading">Home</h1>
+    <p>This page exists so the verification runner has something stable to photograph.</p>
+    <div class="cards">
+        <div class="card"><h2>One</h2><p>Deterministic content.</p></div>
+        <div class="card"><h2>Two</h2><p>No dates, no randomness.</p></div>
+        <div class="card"><h2>Three</h2><p>No third-party embeds.</p></div>
+    </div>
+{% endblock %}

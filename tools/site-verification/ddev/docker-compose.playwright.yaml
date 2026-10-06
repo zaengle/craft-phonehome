@@ -1,0 +1,22 @@
+services:
+  playwright:
+    # Pinned to the same version as @playwright/test in the runner's package.json. The browser and
+    # the OS that renders the screenshots are the whole point of running this in a container: a
+    # baseline captured here is comparable to one captured by CI on the same image, which a
+    # baseline captured on a Mac is not.
+    image: mcr.microsoft.com/playwright:v1.49.1-noble
+    container_name: ddev-${DDEV_SITENAME}-playwright
+    command: ["tail", "-f", "/dev/null"]
+    working_dir: /var/www/html/plugins/craft-phonehome/tools/site-verification
+    labels:
+      com.ddev.site-name: ${DDEV_SITENAME}
+      com.ddev.approot: $DDEV_APPROOT
+    volumes:
+      - "$HOME/Projects/craft-phonehome:/var/www/html/plugins/craft-phonehome"
+    environment:
+      # Addressed by the web container's full name, not by the `web` service alias. Every DDEV
+      # project on the machine publishes `web` on the shared ddev_default network, so that alias
+      # resolves to whichever projects happen to be running and can point this runner at a
+      # different site entirely. Plain HTTP, because this never leaves the project network.
+      - PHV_ORIGIN=http://ddev-${DDEV_SITENAME}-web
+      - PHV_API_ORIGIN=http://ddev-${DDEV_SITENAME}-web

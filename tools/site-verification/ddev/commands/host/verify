@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+
+## Description: Capture, compare, or run a full patch-and-verify loop inside the Playwright container
+## Usage: verify <setup|capture|compare|run> [run-id] [--apply "<command>"] [--yes] [--patch <id>]
+## Example: "ddev verify run patch-001 --apply 'composer update vendor/package'"
+
+set -euo pipefail
+
+MODE="${1:-}"
+RUN_ID="${2:-local}"
+APPLY=""
+ASSUME_YES=""
+PATCH_ID=""
+
+shift 2 2>/dev/null || true
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --apply) APPLY="${2:-}"; shift 2 ;;
+        --yes) ASSUME_YES=1; shift ;;
+        --patch) PATCH_ID="${2:-}"; shift 2 ;;
+        *) echo "Unknown argument: $1" >&2; exit 1 ;;
+    esac
+done
+
+if [ "$MODE" != "setup" ] && [ "$MODE" != "capture" ] && [ "$MODE" != "compare" ] && [ "$MODE" != "run" ]; then
+    echo "Usage: ddev verify <setup|capture|compare|run> [run-id] [--apply \"<command>\"]" >&2
+    exit 1
+fi
+
+CONTAINER="ddev-${DDEV_SITENAME}-playwright"
+WEB="ddev-${DDEV_SITENAME}-web"
+BUNDLE="${DDEV_APPROOT}/../craft-phonehome/tools/site-verification/runs/${WEB}/${RUN_ID}"
+
+# Dependencies are installed inside the container rather than on the host, so the browser, the OS
+# that renders the screenshots and the packages that drive them all come from the same image.
+if [ "$MODE" = "setup" ]; then
+    docker exec "$CONTAINER" npm install
+    exit 0
+fi
+
+TOKEN="$(grep '^PHONEHOME_TOKEN=' "${DDEV_APPROOT}/.env" | cut -d= -f2-)"
+
+if [ -z "$TOKEN" ]; then
+    echo "PHONEHOME_TOKEN is not set in ${DDEV_APPROOT}/.env" >&2
+    exit 1
+fi
+
+# Where to report the finished result, if anywhere. Unset means the run stays local, which is the
+# default: a result is useful on its own and must not depend on a dashboard being reachable. Set
+# PHV_DASHBOARD_ORIGIN in the site's .env to send it to Phone Home, and PHV_DASHBOARD_INSECURE_TLS=1
+# when that is a local DDEV project with a self-signed certificate.
+DASHBOARD="$(grep '^PHV_DASHBOARD_ORIGIN=' "${DDEV_APPROOT}/.env" 2>/dev/null | cut -d= -f2- || true)"
+DASHBOARD_INSECURE="$(grep '^PHV_DASHBOARD_INSECURE_TLS=' "${DDEV_APPROOT}/.env" 2>/dev/null | cut -d= -f2- || true)"
+BASIC_USER="$(grep '^PHV_BASIC_AUTH_USER=' "${DDEV_APPROOT}/.env" 2>/dev/null | cut -d= -f2- || true)"
+BASIC_PASS="$(grep '^PHV_BASIC_AUTH_PASS=' "${DDEV_APPROOT}/.env" 2>/dev/null | cut -d= -f2- || true)"
+
+# Set for the comparison half of a `run`, once a change has supposedly been applied. The runner then
+# refuses to call the comparison a pass when the site reports the same Craft and plugin versions as
+# at baseline: that is a comparison of the old code, whatever the lock file says.
+EXPECT_CHANGE=""
+
+run_half() {
+    docker exec -e "PHV_TOKEN=${TOKEN}" -e "PHV_RUN_ID=${RUN_ID}" -e "PHV_DASHBOARD_ORIGIN=${DASHBOARD}" -e "PHV_DASHBOARD_INSECURE_TLS=${DASHBOARD_INSECURE}" -e "PHV_PATCH_ID=${PATCH_ID}" -e "PHV_BASIC_AUTH_USER=${BASIC_USER}" -e "PHV_BASIC_AUTH_PASS=${BASIC_PASS}" -e "PHV_EXPECT_CHANGE=${EXPECT_CHANGE}" "$CONTAINER" npm run --silent "$1"
+}
+
+# Encodes one value as a JSON string, rather than wrapping it in quotes and hoping.
+#
+# Composer constraints routinely carry quotes ("vendor/pkg:^2"), and an --apply command may carry
+# backslashes or quotes of its own. Interpolating those raw produced a change.json the reporter
+# could not parse, which lost the entire comparison -- the run appeared to fail during startup
+# rather than to have recorded a result. The encoding runs in the web container because PHP is
+# guaranteed there and jq is not guaranteed on the host.
+json_string() {
+    printf '%s' "$1" | docker exec -i "$WEB" php -r 'echo json_encode(stream_get_contents(STDIN));'
+}
+
+# Fingerprints the installed package versions, not the lockfile.
+#
+# Hashing composer.lock whole reports a change when only metadata moved -- a content-hash, a
+# reordering, a dev-branch reference -- and that false positive suppresses the one warning that
+# tells an operator the comparison they are about to read was made across no change at all.
+fingerprint() {
+    docker exec "$WEB" sh -c '
+        for f in /var/www/html/src/composer.lock /var/www/html/composer.lock; do
+            [ -f "$f" ] && php -r "
+                \$l = json_decode(file_get_contents(\"\$argv[1]\"), true);
+                \$p = array_merge(\$l[\"packages\"] ?? [], \$l[\"packages-dev\"] ?? []);
+                \$v = array_map(fn(\$x) => \$x[\"name\"] . \"@\" . \$x[\"version\"], \$p);
+                sort(\$v);
+                echo md5(implode(\",\", \$v));
+            " "$f" && break
+        done
+    '
+}
+
+if [ "$MODE" != "run" ]; then
+    run_half "$MODE"
+    exit 0
+fi
+
+echo "==> Capturing the baseline"
+run_half capture
+
+BEFORE="$(fingerprint)"
+
+echo
+echo "==> Apply the change now"
+
+if [ -n "$APPLY" ]; then
+    echo "    About to run inside ${WEB}:"
+    echo "        ${APPLY}"
+    # --yes is how this runs unattended later. Without a terminal and without --yes the run
+    # stops rather than assuming consent, because the alternative is a script that patches things
+    # nobody agreed to when it happens to be invoked from cron.
+    if [ -n "$ASSUME_YES" ]; then
+        REPLY=y
+        echo "    --yes given; running it."
+    elif [ -t 0 ] || [ -e /dev/tty ]; then
+        printf "    Run it? [y/N] "
+        read -r REPLY < /dev/tty 2>/dev/null || read -r REPLY
+    else
+        echo "    No terminal to ask on, and --yes was not given." >&2
+        exit 1
+    fi
+
+    if [ "$REPLY" != "y" ] && [ "$REPLY" != "Y" ]; then
+        echo "    Declined. The baseline is kept; nothing was compared." >&2
+        exit 1
+    fi
+
+    docker exec "$WEB" sh -c "cd /var/www/html/src 2>/dev/null || cd /var/www/html; ${APPLY}"
+    docker exec "$WEB" sh -c "cd /var/www/html/src 2>/dev/null || cd /var/www/html; php craft up --interactive=0"
+else
+    echo "    Apply the patch however you normally would, then come back."
+    if [ -n "$ASSUME_YES" ]; then
+        echo "    --yes given; assuming the change is already live."
+    else
+        printf "    Press Enter when the change is live, or Ctrl-C to abandon the run. "
+        read -r _ < /dev/tty 2>/dev/null || read -r _
+    fi
+fi
+
+AFTER="$(fingerprint)"
+
+mkdir -p "$BUNDLE"
+cat > "${BUNDLE}/change.json" <<JSON
+{
+  "applied": $( [ -n "$APPLY" ] && json_string "$APPLY" || printf 'null' ),
+  "trigger": "$( [ -n "$APPLY" ] && echo "command" || echo "manual" )",
+  "lock_before": "${BEFORE}",
+  "lock_after": "${AFTER}",
+  "changed": $( [ "$BEFORE" != "$AFTER" ] && echo true || echo false ),
+  "applied_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+JSON
+
+if [ "$BEFORE" = "$AFTER" ]; then
+    echo
+    echo "    ⚠  composer.lock is unchanged. Whatever follows is a comparison across no change,"
+    echo "       which passes for reasons that have nothing to do with the patch."
+fi
+
+echo
+echo "==> Comparing against the frozen baseline"
+EXPECT_CHANGE=1
+run_half compare

@@ -1,5 +1,21 @@
 # Release Notes for Craft Phone Home Plugin
 
+## [1.8.0] - Unreleased
+
+This release adds deployment verification and the workflows Phone Home uses to prepare and prove a security remediation. The API schema moves to 1.5.0, which adds the `verification` field and a `package_name` on each plugin; nothing existing is removed or renamed.
+
+- A site can declare pages to verify in a `verification` block in `config/phonehome.php`, or let the plugin choose them, and the report publishes the result as a verification manifest with its template coverage.
+- The Playwright runner under `tools/site-verification` captures a baseline of those pages, compares a later run against it, and reports one of four outcomes: `passed`, `changes_detected`, `failed` or `inconclusive`. A run that cannot establish anything is inconclusive and is never reported as a pass.
+- Baselines and results are stored on Phone Home, so the two halves of a comparison need not run on the same machine, and a run proves its identity to Phone Home with GitHub's OIDC token in place of a stored secret.
+- The reusable `site-verification.yml` and `remediate.yml` workflows, with the examples a site copies, let Phone Home dispatch a remediation that updates one package, deploys the branch to a sibling environment, compares it, and opens a draft pull request carrying the verdict.
+- A comparison now waits until the environment reports the package versions in the deployed commit's `composer.lock` before it captures the after side, and ends inconclusive when the wait times out. This holds however the workflow was started; before it, a comparison started by a push could measure the environment before the host had deployed the commit.
+- A re-run of a remediation now updates the draft pull request the first attempt opened instead of failing to open a second one, and "Re-run all jobs" redoes the verification rather than finding the open pull request and stopping.
+- Every attempt of a remediation now has its own run id. A re-run that repeats the comparison without the baseline is inconclusive and says to use "Re-run all jobs", rather than comparing against an earlier attempt's capture.
+- The example workflows reference `RELEASE_TAG_TO_FILL_IN`, which a site replaces with this release's tag or a later one.
+- Remediation deploys require a baseline stored on Phone Home, and comparisons require a confirmed deploy. Nested workflows follow the same release commit, and caller inputs are passed through environment variables rather than inserted into shell commands.
+- Staging basic-auth credentials also authenticate the plugin API on the same origin. Deployment checks tolerate older plugins reported by handle and require Craft's version to be reported.
+- Malformed automatic-coverage option types produce an invalid manifest instead of breaking the monitoring response. Expired and future-dated entries do not count toward live template coverage.
+
 ## [1.7.0] - 2026-09-23
 
 - Promote develop to main for 1.7.0 [`#30`](https://github.com/zaengle/craft-phonehome/pull/30)
