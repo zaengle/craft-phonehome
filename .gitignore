@@ -41,3 +41,6 @@ Thumbs.db
 
 # Node modules (if using frontend tooling)
 /node_modules/
+
+# LLMs
+.claude/

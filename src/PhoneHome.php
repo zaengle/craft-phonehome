@@ -7,10 +7,13 @@ use craft\base\Plugin as BasePlugin;
 use Twig\Error\LoaderError;
 use Twig\Error\RuntimeError;
 use Twig\Error\SyntaxError;
+use yii\base\Event;
 use yii\base\Exception;
+use zaengle\phonehome\events\RegisterStatusChecksEvent;
 use zaengle\phonehome\models\Settings;
 use zaengle\phonehome\services\Report;
-use zaengle\phonehome\traits\HasOwnLogfile;
+use zaengle\phonehome\statuschecks\QueueStatusCheck;
+use zaengle\phonehome\traits\HasOwnLogFile;
 
 /**
  * @property  Settings $settings
@@ -19,7 +22,7 @@ use zaengle\phonehome\traits\HasOwnLogfile;
  */
 class PhoneHome extends BasePlugin
 {
-    use HasOwnLogfile;
+    use HasOwnLogFile;
 
     public bool $hasCpSettings = true;
 
@@ -115,5 +118,13 @@ class PhoneHome extends BasePlugin
 
     private function attachEventHandlers(): void
     {
+        Event::on(
+            Report::class,
+            Report::EVENT_REGISTER_STATUS_CHECKS,
+            function(RegisterStatusChecksEvent $event) {
+                // Register the built-in queue status check
+                $event->checks[] = QueueStatusCheck::class;
+            }
+        );
     }
 }

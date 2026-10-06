@@ -8,11 +8,15 @@ use craft\db\Connection;
 use craft\enums\CmsEdition;
 use craft\helpers\App;
 use craft\helpers\Db;
+use craft\helpers\Json;
 use craft\models\UpdateRelease;
 use OutOfBoundsException;
 use RequirementsChecker;
 use yii\base\Component;
+use zaengle\phonehome\enums\NpmStatus;
+use zaengle\phonehome\events\RegisterStatusChecksEvent;
 use zaengle\phonehome\PhoneHome;
+use zaengle\phonehome\statuschecks\StatusCheckInterface;
 
 /**
  * Report service
@@ -24,10 +28,22 @@ use zaengle\phonehome\PhoneHome;
  * @property-read array $metaInfo
  * @property-read array $systemInfo
  * @property-read array $updatesInfo
+ * @property-read array $npmInfo
  * @property-read array $info
  */
 class Report extends Component
 {
+    /**
+     * @event RegisterStatusChecksEvent The event that is triggered when registering status checks
+     */
+    public const EVENT_REGISTER_STATUS_CHECKS = 'registerStatusChecks';
+
+    /**
+     * @var int How many parent directories above @root to search for package.json. One level covers
+     * the common Craft layout where the CMS lives in a subdirectory of the repository.
+     */
+    public const NPM_MANIFEST_SEARCH_DEPTH = 3;
+
     public function getInfo(bool $expandPhpInfo = false): array
     {
         return [
@@ -40,12 +56,14 @@ class Report extends Component
             'ip_address' => Craft::$app->getRequest()->getRemoteIP() ?? 'unknown',
             'environment' => App::env('CRAFT_ENVIRONMENT') ?? 'unknown',
             'dev_mode' => App::devMode(),
-            'composer_lock_updated' => date('c', filemtime(Craft::$app->getComposer()->getLockPath())),
+            'composer_lock_updated' => $this->fileUpdatedAt(Craft::$app->getComposer()->getLockPath()),
+            'npm' => $this->getNpmInfo(),
             'system' => $this->getSystemInfo($expandPhpInfo),
             'plugins' => $this->getPluginsInfo(),
             'modules' => $this->getModulesInfo(),
             'updates' => $this->getUpdatesInfo(),
             'meta' => $this->getMetaInfo(),
+            'status_checks' => $this->getStatusChecks(),
         ];
     }
 
@@ -62,6 +80,336 @@ class Report extends Component
         }
 
         return $meta;
+    }
+
+    /**
+     * Reads declared npm packages from package.json and their resolved versions from package-lock.json.
+     *
+     * Always returns an object so that a consumer can tell a site with no npm dependencies apart from
+     * a site whose dependencies could not be read. The `status` field says which of those it is.
+     *
+     * @return array{status: string, package_manager: string|null, manifest_path: string|null, lock_updated: string|null, dependencies: object, dev_dependencies: object}
+     */
+    protected function getNpmInfo(): array
+    {
+        try {
+            return $this->collectNpmInfo();
+        } catch (\Throwable $e) {
+            // Last resort. This section must never take down the rest of the report, so the fallback is
+            // built literally rather than through npmInfoResult, which could fail the same way again.
+            $this->logError('Error collecting npm info: ' . $e->getMessage());
+
+            return [
+                'status' => NpmStatus::UNREADABLE_MANIFEST->value,
+                'package_manager' => null,
+                'manifest_path' => null,
+                'lock_updated' => null,
+                'dependencies' => (object)[],
+                'dev_dependencies' => (object)[],
+            ];
+        }
+    }
+
+    /**
+     * @return array{status: string, package_manager: string|null, manifest_path: string|null, lock_updated: string|null, dependencies: object, dev_dependencies: object}
+     */
+    protected function collectNpmInfo(): array
+    {
+        // Reading the manifest and reading the lockfile are caught separately, so that a failure after
+        // the manifest was read is not reported as a manifest problem.
+        try {
+            $manifest = $this->findNpmManifest();
+        } catch (\Throwable $e) {
+            $this->logError('Error locating the npm manifest: ' . $e->getMessage());
+            return $this->npmInfoResult(NpmStatus::UNREADABLE_MANIFEST);
+        }
+
+        if ($manifest === null) {
+            return $this->npmInfoResult(NpmStatus::NO_MANIFEST);
+        }
+
+        // Held outside the try so that an unreadable manifest can still report where it was found,
+        // which is the whole point of the field.
+        [$manifestDir, $manifestPath] = $manifest;
+
+        try {
+            $packageJson = file_get_contents($manifestDir . DIRECTORY_SEPARATOR . 'package.json');
+            $package = $packageJson !== false ? Json::decode($packageJson) : null;
+
+            if (!is_array($package)) {
+                $this->logError("Unable to read or parse package.json at '$manifestPath'.");
+                return $this->npmInfoResult(NpmStatus::UNREADABLE_MANIFEST, null, $manifestPath);
+            }
+        } catch (\Throwable $e) {
+            $this->logError("Error reading package.json at '$manifestPath': " . $e->getMessage());
+            return $this->npmInfoResult(NpmStatus::UNREADABLE_MANIFEST, null, $manifestPath);
+        }
+
+        // A non-array value here is malformed, and must cost only that map rather than the section.
+        $declared = is_array($package['dependencies'] ?? null) ? $package['dependencies'] : [];
+        $devDeclared = is_array($package['devDependencies'] ?? null) ? $package['devDependencies'] : [];
+
+        try {
+            // Lockfiles are resolved from the manifest directory, never from @root, so that a manifest
+            // found by walking up is not paired with a lockfile from somewhere else.
+            $npmLockPath = $manifestDir . DIRECTORY_SEPARATOR . 'package-lock.json';
+            $yarnLockPath = $manifestDir . DIRECTORY_SEPARATOR . 'yarn.lock';
+            $pnpmLockPath = $manifestDir . DIRECTORY_SEPARATOR . 'pnpm-lock.yaml';
+
+            // Only npm lockfiles are parsed. yarn and pnpm lockfiles are detected and named so that the
+            // distinction is expressible downstream, but their declared packages report a null version.
+            if (is_file($yarnLockPath) && !is_file($npmLockPath)) {
+                return $this->npmInfoResult(
+                    NpmStatus::UNSUPPORTED_LOCKFILE,
+                    'yarn',
+                    $manifestPath,
+                    $this->fileUpdatedAt($yarnLockPath),
+                    $declared,
+                    $devDeclared,
+                );
+            }
+
+            if (is_file($pnpmLockPath) && !is_file($npmLockPath)) {
+                return $this->npmInfoResult(
+                    NpmStatus::UNSUPPORTED_LOCKFILE,
+                    'pnpm',
+                    $manifestPath,
+                    $this->fileUpdatedAt($pnpmLockPath),
+                    $declared,
+                    $devDeclared,
+                );
+            }
+
+            if (!is_file($npmLockPath)) {
+                return $this->npmInfoResult(NpmStatus::NO_LOCKFILE, null, $manifestPath, null, $declared, $devDeclared);
+            }
+
+            $lock = $this->getNpmLock($npmLockPath);
+
+            return $this->npmInfoResult(
+                $lock === null ? NpmStatus::UNREADABLE_LOCKFILE : NpmStatus::OK,
+                'npm',
+                $manifestPath,
+                $this->fileUpdatedAt($npmLockPath),
+                $declared,
+                $devDeclared,
+                $lock,
+            );
+        } catch (\Throwable $e) {
+            // The manifest was read, so the declared packages are still reported. Only their resolved
+            // versions are lost.
+            $this->logError('Error reading the npm lockfile: ' . $e->getMessage());
+            return $this->npmInfoResult(NpmStatus::UNREADABLE_LOCKFILE, null, $manifestPath, null, $declared, $devDeclared);
+        }
+    }
+
+    /**
+     * Builds the npm section of the report.
+     *
+     * @param array<mixed> $declared Declared production dependencies from package.json.
+     * @param array<mixed> $devDeclared Declared development dependencies from package.json.
+     * @param array<mixed>|null $lock The decoded npm lockfile, or null when there is nothing to resolve against.
+     * @return array{status: string, package_manager: string|null, manifest_path: string|null, lock_updated: string|null, dependencies: object, dev_dependencies: object}
+     */
+    protected function npmInfoResult(
+        NpmStatus $status,
+        ?string $packageManager = null,
+        ?string $manifestPath = null,
+        ?string $lockUpdated = null,
+        array $declared = [],
+        array $devDeclared = [],
+        ?array $lock = null,
+    ): array {
+        return [
+            'status' => $status->value,
+            'package_manager' => $packageManager,
+            'manifest_path' => $manifestPath,
+            'lock_updated' => $lockUpdated,
+            'dependencies' => (object)$this->mapNpmDependencies($declared, $lock),
+            'dev_dependencies' => (object)$this->mapNpmDependencies($devDeclared, $lock),
+        ];
+    }
+
+    /**
+     * Locates the directory holding package.json.
+     *
+     * The npm manifest is not always beside composer.json. A common Craft convention puts the Craft
+     * install in a subdirectory, so `@root` resolves one level below the repository root where the
+     * manifest and lockfile actually live. Assuming `@root` reports such a site as having no npm
+     * dependencies at all, which is indistinguishable from a site that genuinely has none.
+     *
+     * The configured npmPath wins when set. Otherwise `@root` is checked first, then each parent up
+     * to NPM_MANIFEST_SEARCH_DEPTH levels, stopping at the first manifest found and never walking
+     * above the filesystem root.
+     *
+     * @return array{0: string, 1: string}|null The absolute directory, and its path relative to @root.
+     */
+    protected function findNpmManifest(): ?array
+    {
+        $root = Craft::getAlias('@root');
+
+        if (!is_string($root)) {
+            return null;
+        }
+
+        $root = rtrim($root, DIRECTORY_SEPARATOR);
+        $configured = $this->getConfiguredNpmPath();
+
+        if ($configured !== null) {
+            // A relative setting is resolved against @root, so that config is portable between
+            // environments whose absolute paths differ.
+            $dir = str_starts_with($configured, DIRECTORY_SEPARATOR)
+                ? rtrim($configured, DIRECTORY_SEPARATOR)
+                : $root . DIRECTORY_SEPARATOR . trim($configured, DIRECTORY_SEPARATOR);
+
+            if (!is_file($dir . DIRECTORY_SEPARATOR . 'package.json')) {
+                $this->logError("No package.json at the configured npmPath '$configured'.");
+                return null;
+            }
+
+            return [$dir, $this->pathRelativeToRoot($root, $dir)];
+        }
+
+        $dir = $root;
+
+        for ($level = 0; $level <= self::NPM_MANIFEST_SEARCH_DEPTH; $level++) {
+            if (is_file($dir . DIRECTORY_SEPARATOR . 'package.json')) {
+                return [$dir, $this->pathRelativeToRoot($root, $dir)];
+            }
+
+            $parent = dirname($dir);
+
+            // dirname() is its own parent at the filesystem root.
+            if ($parent === $dir) {
+                break;
+            }
+
+            $dir = $parent;
+        }
+
+        return null;
+    }
+
+    /**
+     * Expresses a directory relative to @root, so that the report never discloses an absolute
+     * server path. Returns '.', '..', '../..' and so on.
+     */
+    protected function pathRelativeToRoot(string $root, string $dir): string
+    {
+        $root = realpath($root) ?: $root;
+        $dir = realpath($dir) ?: $dir;
+
+        if ($root === $dir) {
+            return '.';
+        }
+
+        $rootParts = explode(DIRECTORY_SEPARATOR, trim($root, DIRECTORY_SEPARATOR));
+        $dirParts = explode(DIRECTORY_SEPARATOR, trim($dir, DIRECTORY_SEPARATOR));
+
+        while ($rootParts !== [] && $dirParts !== [] && $rootParts[0] === $dirParts[0]) {
+            array_shift($rootParts);
+            array_shift($dirParts);
+        }
+
+        $path = implode('/', array_merge(array_fill(0, count($rootParts), '..'), $dirParts));
+
+        return $path === '' ? '.' : $path;
+    }
+
+    /**
+     * @return array<mixed>|null The decoded lockfile, or null if it cannot be read or parsed.
+     */
+    protected function getNpmLock(string $lockPath): ?array
+    {
+        try {
+            $lockJson = file_get_contents($lockPath);
+            $lock = $lockJson !== false ? Json::decode($lockJson) : null;
+
+            return is_array($lock) ? $lock : null;
+        } catch (\Throwable $e) {
+            $this->logError('Error parsing package-lock.json: ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Maps declared packages to their resolved versions.
+     *
+     * Only top-level installs are matched, so a nested transitive copy of a package cannot clobber the
+     * version of a package the project declares itself.
+     *
+     * @param array<mixed> $declared Package name => declared version constraint.
+     * @param array<mixed>|null $lock The decoded lockfile, or null when no version can be resolved.
+     * @return array<string, array{constraint: string|null, version: string|null}>
+     */
+    protected function mapNpmDependencies(array $declared, ?array $lock): array
+    {
+        return collect($declared)
+            ->filter(function($constraint, $name) {
+                if (is_string($constraint)) {
+                    return true;
+                }
+
+                $this->logError("Skipping malformed npm dependency '$name': expected a string constraint.");
+                return false;
+            })
+            ->mapWithKeys(function(string $constraint, string $name) use ($lock) {
+                $version = $lock['packages']['node_modules/' . $name]['version']
+                    ?? $lock['dependencies'][$name]['version']
+                    ?? null;
+
+                return [
+                    $name => [
+                        'constraint' => $this->stripUrlCredentials($constraint),
+                        'version' => is_string($version) ? $this->stripUrlCredentials($version) : null,
+                    ],
+                ];
+            })
+            ->toArray();
+    }
+
+    /**
+     * Removes credentials from a URL value, keeping the conventional git@ SSH user.
+     *
+     * The character class runs to the last @ in the authority so that a password containing an @
+     * is stripped in full. A / still bounds the match, so it cannot run into the path.
+     */
+    protected function stripUrlCredentials(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        return preg_replace('#(://)(?!git@)[^/\s]+@#', '$1', $value) ?? null;
+    }
+
+
+    /**
+     * Returns the configured npm manifest directory. Overridable so that the lookup can be exercised
+     * without a booted Craft application.
+     */
+    protected function getConfiguredNpmPath(): ?string
+    {
+        return PhoneHome::$plugin->getSettings()->getNpmPath();
+    }
+
+    /**
+     * Logs an error. Overridable so that collection failures can be observed in tests.
+     */
+    protected function logError(string $message): void
+    {
+        PhoneHome::error($message);
+    }
+
+    protected function fileUpdatedAt(string $path): ?string
+    {
+        if (!is_file($path)) {
+            return null;
+        }
+
+        $mtime = filemtime($path);
+
+        return $mtime !== false ? date('c', $mtime) : null;
     }
 
     protected function getSystemInfo(bool $expandPhpInfo = false): array
@@ -186,7 +534,7 @@ class Report extends Component
     {
         $nonPluginModuleHandles = array_diff(
             array_keys(Craft::$app->modules),
-            array_keys(Craft::$app->plugins->allPluginInfo)
+            array_keys(Craft::$app->getPlugins()->getAllPluginInfo())
         );
 
         $modules = [];
@@ -222,7 +570,6 @@ class Report extends Component
                         'package' => 'craftcms/cms',
                         'critical' => $release->critical,
                         'release_date' => $release->date?->format('c'),
-//                        'notes' => $release->notes,
                     ];
                 }
 
@@ -240,8 +587,7 @@ class Report extends Component
                             'version' => $release->version,
                             'package' => $pluginData->packageName,
                             'critical' => $release->critical,
-                            'release_date' => date('c', $release->date),
-//                            'notes' => $release->notes,
+                            'release_date' => $release->date?->format('c'),
                         ];
                     }
 
@@ -249,7 +595,7 @@ class Report extends Component
                 }
             }
         } catch (\Throwable $e) {
-            PhoneHome::warning('Error extracting detailed update info: ' . $e->getMessage());
+            PhoneHome::error('Error extracting detailed update info: ' . $e->getMessage());
         }
 
         PhoneHome::info('Total updates found: ' . count($updates));
@@ -356,5 +702,21 @@ class Report extends Component
             return Craft::$app->edition->name;
         }
         return Craft::$app->getEditionName();
+    }
+
+    private function getStatusChecks(): array
+    {
+        // Create and trigger the event to allow registration of status checks
+        $event = new RegisterStatusChecksEvent();
+        $this->trigger(self::EVENT_REGISTER_STATUS_CHECKS, $event);
+
+        // Collect results from all registered checks
+        $results = [];
+        foreach ($event->checks as $checkClass) {
+            /** @var StatusCheckInterface $checkClass */
+            $results[] = $checkClass::check();
+        }
+
+        return $results;
     }
 }
