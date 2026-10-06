@@ -120,6 +120,86 @@ test.describe('pr-body.sh', () => {
     });
 });
 
+test.describe('pr-body.sh on a resumed branch', () => {
+    test('a branch an earlier run pushed points at its commit rather than showing an empty list', () => {
+        const body = prBody({ ...verified, MOVED: '', COUNT: '' });
+
+        expect(body).toContain("so what moved is in that branch's commit rather than repeated here.");
+        expect(body).not.toContain('```\n\n```');
+    });
+});
+
+/**
+ * A stand-in `gh` for open-pr.sh, recording each call so a test can say which of create and edit
+ * ran. `openUrl` is the pull request already open for the branch, or empty for none.
+ */
+function fakePrGh(openUrl: string): { dir: string; calls: string } {
+    const dir = mkdtempSync(join(tmpdir(), 'phv-gh-'));
+    const calls = join(dir, 'calls');
+
+    writeFileSync(calls, '');
+    writeFileSync(
+        join(dir, 'gh'),
+        `#!/usr/bin/env bash
+echo "$*" >> '${calls}'
+case "$1 $2" in
+  "pr list") echo '${openUrl}' ;;
+  "pr edit") exit 0 ;;
+  "pr create") echo "https://github.com/z/x/pull/26" ;;
+  *) echo "unexpected gh $*" >&2; exit 64 ;;
+esac`,
+    );
+    spawnSync('chmod', ['+x', join(dir, 'gh')]);
+
+    return { dir, calls };
+}
+
+function openPr(openUrl: string) {
+    const gh = fakePrGh(openUrl);
+    const outputs = join(gh.dir, 'outputs');
+    writeFileSync(outputs, '');
+
+    const run = spawnSync('bash', [join(ci, 'open-pr.sh')], {
+        env: {
+            PATH: `${gh.dir}:${process.env.PATH ?? ''}`,
+            GITHUB_OUTPUT: outputs,
+            BRANCH: 'security/patch-31-site-2',
+            BASE: 'main',
+            TITLE: 'Security: craftcms/cms to 5.8.15',
+            BODY_FILE: '/tmp/pr-body.md',
+        },
+        encoding: 'utf8',
+    });
+
+    return { status: run.status, stderr: run.stderr, outputs: readFileSync(outputs, 'utf8'), calls: readFileSync(gh.calls, 'utf8').trim().split('\n') };
+}
+
+test.describe('open-pr.sh', () => {
+    test('with no pull request open, a draft is created and its URL published', () => {
+        const result = openPr('');
+
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.calls).toEqual([
+            'pr list --head security/patch-31-site-2 --state open --json url --jq .[0].url // empty',
+            'pr create --draft --base main --head security/patch-31-site-2 --title Security: craftcms/cms to 5.8.15 --body-file /tmp/pr-body.md',
+        ]);
+        expect(result.outputs).toBe('url=https://github.com/z/x/pull/26\n');
+    });
+
+    test('a re-run updates the open pull request instead of asking for a second one', () => {
+        // The pilot's re-run: #25 was already open for the branch, GitHub refused a second pull
+        // request, the job failed, and #25 kept the first attempt's inconclusive verdict.
+        const result = openPr('https://github.com/z/x/pull/25');
+
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.calls).toEqual([
+            'pr list --head security/patch-31-site-2 --state open --json url --jq .[0].url // empty',
+            'pr edit https://github.com/z/x/pull/25 --body-file /tmp/pr-body.md',
+        ]);
+        expect(result.outputs).toBe('url=https://github.com/z/x/pull/25\n');
+    });
+});
+
 test.describe('site-token.sh', () => {
     const run = (env: Record<string, string>) => spawnSync('bash', [join(ci, 'site-token.sh')], { env: { PATH: process.env.PATH ?? '', ...env }, encoding: 'utf8' });
 

@@ -154,3 +154,21 @@ test('a comparison waits for the environment to be running the commit, whatever 
     // The remediation's own comparison is of the branch, not of the commit the dispatch ran on.
     expect(job('verify')).toContain('lock_ref: ${{ inputs.branch }}');
 });
+
+test('a re-run updates the open pull request rather than failing to open a second', () => {
+    const pullRequest = job('pull_request');
+
+    expect(pullRequest).toContain('bash runner/tools/site-verification/ci/open-pr.sh');
+    expect(pullRequest).not.toContain('gh pr create');
+    // Phone Home is told the URL the script published, whichever of the two it was.
+    expect(pullRequest).toContain('"pull_request_url\\":\\"${{ steps.pr.outputs.url }}');
+});
+
+test('a re-run of a run redoes the verification even though its pull request is open', () => {
+    // A new dispatch still leaves an open pull request alone. Without the attempt check, "Re-run all
+    // jobs" found the pull request the first attempt opened and skipped every job.
+    const check = job('check');
+
+    expect(check).toContain('if [ "${open:-0}" -gt 0 ] && [ "${{ github.run_attempt }}" = "1" ]; then');
+    expect(check.indexOf('github.run_attempt }}" = "1"')).toBeLessThan(check.indexOf('--state closed'));
+});

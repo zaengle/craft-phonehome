@@ -91,9 +91,11 @@ jobs:
   # Settles three facts before any work starts: whether the branch already exists, whether a pull
   # request for it is already open, and which commit of the runner to use.
   #
-  # An open pull request is a dispatch that already finished; re-running must not open a second
-  # one. A branch with no pull request is a dispatch that failed somewhere after the push, and is
-  # picked up from there rather than declined: the branch is kept, the verification is redone.
+  # An open pull request is a dispatch that already finished, and a new dispatch leaves it alone.
+  # A re-run of this run is different: somebody asked for the verification to be redone, so it is,
+  # and the pull request job updates the open pull request rather than opening a second one. A
+  # branch with no pull request is a dispatch that failed somewhere after the push, and is picked
+  # up from there rather than declined: the branch is kept, the verification is redone.
   check:
     runs-on: ubuntu-latest
     outputs:
@@ -122,9 +124,12 @@ jobs:
           fi
 
           open="$(gh pr list --head "${{ inputs.branch }}" --state open --json number --jq 'length')"
-          if [ "${open:-0}" -gt 0 ]; then
+          if [ "${open:-0}" -gt 0 ] && [ "${{ github.run_attempt }}" = "1" ]; then
             echo "::notice::A pull request for ${{ inputs.branch }} is already open; nothing to prepare."
             echo "has_pr=1" >> "$GITHUB_OUTPUT"
+          elif [ "${open:-0}" -gt 0 ]; then
+            echo "::notice::This is attempt ${{ github.run_attempt }} of the run, so the verification is redone and the open pull request for ${{ inputs.branch }} is updated with its verdict."
+            echo "has_pr=0" >> "$GITHUB_OUTPUT"
           else
             echo "has_pr=0" >> "$GITHUB_OUTPUT"
 
@@ -351,7 +356,11 @@ jobs:
       # only says whether its step exited zero, and a comparison that found a regression exits
       # non-zero on purpose — reporting that as "failure" would be true and useless, and reporting a
       # tolerated failure as "success" would be worse.
-      - name: Open a draft pull request
+      #
+      # A re-run finds the pull request an earlier attempt opened. That one is updated with this
+      # attempt's verdict rather than a second one requested, which GitHub refuses, and Phone Home
+      # is told the same URL either way.
+      - name: Open or update the draft pull request
         id: pr
         env:
           GH_TOKEN: ${{ github.token }}
@@ -369,13 +378,13 @@ jobs:
           VERIFICATION: ${{ needs.verify.outputs.overall }}
           VERIFICATION_SUMMARY: ${{ needs.verify.outputs.summary }}
           ENVIRONMENT: ${{ needs.verify.outputs.environment }}
+          BRANCH: ${{ inputs.branch }}
+          BASE: ${{ github.ref_name }}
+          TITLE: 'Security: ${{ inputs.package }} to ${{ inputs.version }}'
+          BODY_FILE: /tmp/pr-body.md
         run: |
           bash runner/tools/site-verification/ci/pr-body.sh > /tmp/pr-body.md
-
-          url="$(gh pr create --draft --base "${{ github.ref_name }}" --head "${{ inputs.branch }}" \
-            --title "Security: ${{ inputs.package }} to ${{ inputs.version }}" --body-file /tmp/pr-body.md)"
-
-          echo "url=$url" >> "$GITHUB_OUTPUT"
+          bash runner/tools/site-verification/ci/open-pr.sh
 
       - name: Tell Phone Home where the pull request is
         if: steps.pr.outputs.url != '' && env.PHONEHOME_TOKEN != ''
