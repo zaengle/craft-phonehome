@@ -1,6 +1,6 @@
 # Release Notes for Craft Phone Home Plugin
 
-## [1.8.1] - Unreleased
+## [1.8.1] - 2026-10-06
 
 This release changes the shared remediation workflows and the example files a site copies. The plugin itself and its API are unchanged, so the API schema stays at 1.5.0.
 
