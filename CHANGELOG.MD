@@ -1,6 +1,6 @@
 # Release Notes for Craft Phone Home Plugin
 
-## [1.8.0] - Unreleased
+## [1.8.0] - 2026-10-06
 
 This release adds deployment verification and the workflows Phone Home uses to prepare and prove a security remediation. The API schema moves to 1.5.0, which adds the `verification` field and a `package_name` on each plugin; nothing existing is removed or renamed.
 
