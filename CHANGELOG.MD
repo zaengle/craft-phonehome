@@ -1,6 +1,6 @@
 # Release Notes for Craft Phone Home Plugin
 
-## [1.8.2] - Unreleased
+## [1.8.2] - 2026-10-06
 
 This release changes how the shared remediation workflow updates Composer. The plugin itself and its API are unchanged, so the API schema stays at 1.5.0.
 
