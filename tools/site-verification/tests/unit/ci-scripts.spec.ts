@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -52,7 +52,7 @@ require('fs').appendFileSync(process.env.CALLS, JSON.stringify(process.argv.slic
     expect(run.status, run.stderr).toBe(0);
     expect(existsSync(marker)).toBe(false);
     expect(readFileSync(calls, 'utf8').trim().split('\n').map((line) => JSON.parse(line))).toContainEqual([
-        'commit', '-m', `Security: craftcms/cms to ${version} (patch #1)`,
+        'commit', '-m', `Security: craftcms/cms to ${version} (Phone Home patch 1)`,
     ]);
 });
 
@@ -88,7 +88,8 @@ test.describe('pr-body.sh', () => {
         const body = prBody(verified);
 
         expect(body).toContain('**Verification** — `changes_detected` against https://staging.example. 1 of 9 checks did not pass');
-        expect(body).toContain('Deployed to https://staging.example by https://github.com/z/x/actions/runs/9.');
+        expect(body).toContain('The deploy workflow finished (https://github.com/z/x/actions/runs/9).');
+        expect(body).not.toContain('Deployed to');
         expect(body).toContain('**Environment: craftcms/cms 5.8.14 → 5.8.15.**');
         expect(body).toContain('It did not exercise forms, the control panel, queue jobs, console commands');
         expect(body).not.toContain('[!WARNING]');
@@ -153,15 +154,79 @@ test.describe('pr-body.sh', () => {
     });
 
     test('an unreachable dashboard is said so rather than omitted', () => {
-        const body = prBody({ ...verified, CONTEXT: '' });
+        const body = prBody({ ...verified, CONTEXT: '', DASHBOARD_ORIGIN: 'https://ph.example/' });
 
-        expect(body).toContain('Phone Home could not be reached for the assessment behind patch #7');
+        expect(body).toContain('Phone Home could not be reached for the assessment behind [patch 7](https://ph.example/patches/7)');
+    });
+
+    test('the patch is a link to Phone Home, never a bare #number that GitHub links to an unrelated issue', () => {
+        // On zaengle/v4.1.zaengle.com#291 "patch #90" linked to that repository's own #90.
+        const context = JSON.stringify({ patch: { title: 'Formie 3.1.43', url: 'https://ph.example/patches/90' }, reviews: [] });
+        const answered = prBody({ ...verified, PATCH_ID: '90', CONTEXT: context, DASHBOARD_ORIGIN: 'https://elsewhere.example' });
+        const unreachable = prBody({ ...verified, PATCH_ID: '90', CONTEXT: '', DASHBOARD_ORIGIN: 'https://ph.example' });
+        const nowhere = prBody({ ...verified, PATCH_ID: '90', CONTEXT: '' });
+
+        // The page's own URL wins over one built from the origin.
+        expect(answered).toContain('Prepared by Phone Home for [patch 90](https://ph.example/patches/90).');
+        expect(unreachable).toContain('Prepared by Phone Home for [patch 90](https://ph.example/patches/90).');
+        expect(nowhere).toContain('Prepared by Phone Home for patch 90.');
+
+        for (const body of [answered, unreachable, nowhere]) {
+            expect(body).not.toMatch(/(^|[^\w&/])#\d+/m);
+        }
     });
 
     test('a command with quotes in what moved does not break the body', () => {
         const body = prBody({ ...verified, MOVED: 'vendor/pkg "^2" -> 2.0.0' });
 
         expect(body).toContain('vendor/pkg "^2" -> 2.0.0');
+    });
+});
+
+test.describe('pr-body.sh on how the deploy was confirmed', () => {
+    test('the deploy workflow finishing and the environment confirming it are stated as two facts', () => {
+        const body = prBody({ ...verified, DEPLOY_CONFIRMED_BY: 'commit', DEPLOY_CONFIRMATION: 'the environment reported commit dca2ad2f0c6b' });
+
+        expect(body).toContain(
+            'The deploy workflow finished (https://github.com/z/x/actions/runs/9). Before the comparison, the environment reported commit dca2ad2f0c6b, confirming that https://staging.example was running this branch.',
+        );
+    });
+
+    test('the lock file hash and the versions are named the same way', () => {
+        expect(prBody({ ...verified, DEPLOY_CONFIRMED_BY: 'lock_hash', DEPLOY_CONFIRMATION: 'the environment reported lock file hash 3f2b' })).toContain(
+            'Before the comparison, the environment reported lock file hash 3f2b, confirming',
+        );
+        expect(
+            prBody({ ...verified, DEPLOY_CONFIRMED_BY: 'versions', DEPLOY_CONFIRMATION: 'the environment reported the Craft and plugin versions in the lock file' }),
+        ).toContain('Before the comparison, the environment reported the Craft and plugin versions in the lock file, confirming');
+    });
+
+    test('a comparison whose wait was never confirmed says so, rather than implying it was', () => {
+        // The case the review found: the deploy workflow finished, the wait timed out, and the old
+        // wording read as though staging had confirmed the branch in some unrecorded way.
+        const body = prBody({ ...verified, VERIFICATION: 'inconclusive', DEPLOY_CONFIRMED_BY: '', DEPLOY_CONFIRMATION: '' });
+
+        expect(body).toContain(
+            'https://staging.example did not confirm that it was running this branch before the comparison, so the result above may not be of this change.',
+        );
+        expect(body).not.toContain('confirming that');
+    });
+});
+
+test.describe('pr-body.sh on how far the update reached', () => {
+    test('an exact update says nothing else was allowed to move', () => {
+        expect(prBody({ ...verified, SCOPE: 'exact' })).toContain('Only the requested package was allowed to move.');
+    });
+
+    test('a widened update says how far and quotes the conflict that made it widen', () => {
+        const body = prBody({ ...verified, SCOPE: 'dependencies', SCOPE_REASON: 'verbb/formie 3.1.43 requires verbb/base ^3.0.17.' });
+
+        expect(body).toContain('its own dependencies were allowed to move as well, with the fewest changes Composer could make. No root requirement, such as Craft, was moved. Composer reported: verbb/formie 3.1.43 requires verbb/base ^3.0.17.');
+        expect(prBody({ ...verified, SCOPE: 'all', SCOPE_REASON: 'x' })).toContain('root requirements such as Craft were allowed to move too');
+    });
+
+    test('a run that did not resolve the change says nothing about scope', () => {
+        expect(prBody({ ...verified, SCOPE: '' })).not.toContain('allowed to move');
     });
 });
 
@@ -419,6 +484,22 @@ test.describe('summarise.mjs', () => {
         expect(stdout).toContain('Use "Re-run all jobs" so the baseline is captured again.');
     });
 
+    test('how the environment confirmed the deploy is published and stated', () => {
+        const commit = summarise({ overall: 'passed', checks: [], deploy_confirmation: { confirmed_by: 'commit', value: 'dca2ad2f0c6b' } });
+
+        expect(commit.outputs).toContain('deploy_confirmed_by=commit\ndeploy_confirmation=the environment reported commit dca2ad2f0c6b\n');
+        expect(commit.stdout).toContain('Before comparing, the environment reported commit dca2ad2f0c6b.');
+
+        expect(summarise({ overall: 'passed', checks: [], deploy_confirmation: { confirmed_by: 'lock_hash', value: '3f2b' } }).outputs).toContain(
+            'deploy_confirmation=the environment reported lock file hash 3f2b\n',
+        );
+        expect(summarise({ overall: 'passed', checks: [], deploy_confirmation: { confirmed_by: 'versions', value: null } }).outputs).toContain(
+            'deploy_confirmation=the environment reported the Craft and plugin versions in the lock file\n',
+        );
+        // A capture, or a comparison that did not wait, says nothing about a deploy.
+        expect(summarise({ overall: 'passed', checks: [] }).outputs).toContain('deploy_confirmed_by=\ndeploy_confirmation=\n');
+    });
+
     test('a capture has no environment line', () => {
         expect(summarise({ overall: 'passed', checks: [] }).outputs).toContain('environment=\n');
     });
@@ -431,6 +512,7 @@ test.describe('summarise.mjs', () => {
 
         expect(run.status).toBe(0);
         expect(readFileSync(outputs, 'utf8')).toContain('overall=\nsummary=The run produced no result, so nothing was verified.\n');
+        expect(readFileSync(outputs, 'utf8')).toContain('deploy_confirmed_by=\n');
     });
 
     test('a newline in a diagnostic cannot break a workflow output', () => {
@@ -440,5 +522,155 @@ test.describe('summarise.mjs', () => {
         });
 
         expect(outputs.split('\n').filter((line) => line.startsWith('summary=')).length).toBe(1);
+    });
+});
+
+/** How the stand-in `composer` answers each of the three update steps the script may try. */
+type Step = 'exact' | 'dependencies' | 'all';
+type Answers = Partial<Record<Step, number>>;
+
+const CONFLICT = `Your requirements could not be resolved to an installable set of packages.
+
+  Problem 1
+    - Root composer.json requires verbb/formie 3.1.43 -> satisfiable by verbb/formie[3.1.43].
+    - verbb/formie 3.1.43 requires verbb/base ^3.0.17 -> found verbb/base[3.0.17] but the package is fixed to 3.0.12 (lock file version) by a partial update and that version does not match. Make sure you list it as an argument for the update command.
+`;
+
+/**
+ * A site whose Craft application lives in `src/`, with a stand-in `composer` on PATH. It records
+ * every call, and answers each update step with the exit status the test gives it: 0 moves
+ * Formie in the lock file it finds where it is run, as the real one would, and 2 prints a
+ * dependency conflict after scribbling on the lock file, which the script must undo before its
+ * next attempt.
+ */
+function siteInSubdirectory(answers: Answers = {}): { root: string; app: string; bin: string; calls: string } {
+    // Resolved, because the temporary directory is reached through a symlink on macOS and the
+    // stand-in reports the real path it ran in.
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'phv-site-')));
+    const app = join(root, 'src');
+    const bin = join(root, 'bin');
+    const calls = join(root, 'calls');
+
+    spawnSync('mkdir', ['-p', app, bin]);
+    writeFileSync(calls, '');
+    writeFileSync(join(app, 'composer.json'), '{"require":{"craftcms/cms":"^5.8"}}');
+    writeFileSync(
+        join(app, 'composer.lock'),
+        JSON.stringify({ packages: [{ name: 'verbb/formie', version: '3.1.42' }, { name: 'craftcms/cms', version: '5.11.1' }] }),
+    );
+    writeFileSync(
+        join(bin, 'composer'),
+        `#!/usr/bin/env bash
+echo "$* in $(pwd)" >> '${calls}'
+case "$*" in
+  *--with-all-dependencies*) code=${answers.all ?? 0} ;;
+  *--with-dependencies*) code=${answers.dependencies ?? 0} ;;
+  *) code=${answers.exact ?? 0} ;;
+esac
+if [ "$code" = 2 ]; then
+  echo '{"packages":[{"name":"half/written","version":"0.0.1"}]}' > composer.lock
+  printf '%s' '${CONFLICT}' >&2
+  exit 2
+fi
+[ "$code" = 0 ] || { echo "The 'https://composer.example/packages.json' URL required authentication." >&2; exit "$code"; }
+php -r '$l = json_decode(file_get_contents("composer.lock"), true); $l["packages"][0]["version"] = "3.1.43"; file_put_contents("composer.lock", json_encode($l));'`,
+    );
+    spawnSync('chmod', ['+x', join(bin, 'composer')]);
+
+    return { root, app, bin, calls };
+}
+
+function resolveChange(cwd: string, site: { bin: string; calls: string }) {
+    const outputs = join(mkdtempSync(join(tmpdir(), 'phv-resolve-')), 'outputs');
+    writeFileSync(outputs, '');
+
+    const run = spawnSync('bash', [join(ci, 'resolve-change.sh')], {
+        cwd,
+        env: { PATH: `${site.bin}:${process.env.PATH ?? ''}`, GITHUB_OUTPUT: outputs, PACKAGE: 'verbb/formie', VERSION: '3.1.43' },
+        encoding: 'utf8',
+    });
+
+    return {
+        status: run.status,
+        stdout: run.stdout,
+        stderr: run.stderr,
+        outputs: readFileSync(outputs, 'utf8'),
+        calls: readFileSync(site.calls, 'utf8').trim().split('\n').filter(Boolean),
+    };
+}
+
+const REASON = 'verbb/formie 3.1.43 requires verbb/base ^3.0.17 -> found verbb/base[3.0.17] but the package is fixed to 3.0.12 (lock file version) by a partial update and that version does not match.';
+
+test.describe('resolve-change.sh', () => {
+    test('tries the exact update first, and stops there when it resolves', () => {
+        const site = siteInSubdirectory();
+        const result = resolveChange(site.app, site);
+
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.calls).toEqual([`update verbb/formie:3.1.43 --no-interaction --no-scripts in ${site.app}`]);
+        expect(result.outputs).toBe('count=1\nscope=exact\nscope_reason=\nmoved<<MOVED\nverbb/formie 3.1.42 -> 3.1.43\nMOVED\n');
+        // Nothing is written at the repository root, and the working files are cleaned up.
+        expect(existsSync(join(site.root, 'composer.lock'))).toBe(false);
+        expect(existsSync(join(site.app, 'composer.lock.before'))).toBe(false);
+        expect(existsSync(join(site.app, 'composer.err'))).toBe(false);
+    });
+
+    test('a conflict widens to the package\'s own dependencies, from the original lock file, and says why', () => {
+        // #291 on the first real site moved 48 packages for one Formie release because the update
+        // always started from every dependency.
+        const site = siteInSubdirectory({ exact: 2 });
+        const result = resolveChange(site.app, site);
+
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.calls).toEqual([
+            `update verbb/formie:3.1.43 --no-interaction --no-scripts in ${site.app}`,
+            `update verbb/formie:3.1.43 --with-dependencies --minimal-changes --no-interaction --no-scripts in ${site.app}`,
+        ]);
+        expect(result.outputs).toContain('scope=dependencies\n');
+        expect(result.outputs).toContain(`scope_reason=${REASON}\n`);
+        // The failed attempt's half-written lock file was put back before the next one.
+        expect(result.outputs).toContain('count=1\n');
+        expect(result.outputs).not.toContain('half/written');
+    });
+
+    test('only when that also conflicts may root requirements move, still with minimal changes', () => {
+        const site = siteInSubdirectory({ exact: 2, dependencies: 2 });
+        const result = resolveChange(site.app, site);
+
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.calls.at(-1)).toBe(`update verbb/formie:3.1.43 --with-all-dependencies --minimal-changes --no-interaction --no-scripts in ${site.app}`);
+        expect(result.calls).toHaveLength(3);
+        expect(result.outputs).toContain('scope=all\n');
+        expect(result.outputs).toContain(`scope_reason=${REASON}\n`);
+    });
+
+    test('a conflict at every step fails before anything is pushed', () => {
+        const site = siteInSubdirectory({ exact: 2, dependencies: 2, all: 2 });
+        const result = resolveChange(site.app, site);
+
+        expect(result.status).toBe(2);
+        expect(result.calls).toHaveLength(3);
+        expect(result.stdout).toContain(`::error::verbb/formie could not be moved to 3.1.43 even with every dependency allowed to move: ${REASON}`);
+        expect(result.outputs).toBe('');
+    });
+
+    test('a failure that is not a conflict is not retried more broadly', () => {
+        const site = siteInSubdirectory({ exact: 1 });
+        const result = resolveChange(site.app, site);
+
+        expect(result.status).toBe(1);
+        expect(result.calls).toHaveLength(1);
+        expect(result.stdout).toContain('which is not a dependency conflict, so no broader update was tried');
+        expect(result.stderr).toContain('required authentication');
+    });
+
+    test('run from a root with no Composer files, it names working_directory rather than inventing a lock file', () => {
+        const site = siteInSubdirectory();
+        const result = resolveChange(site.root, site);
+
+        expect(result.status).toBe(1);
+        expect(result.stdout).toContain('set working_directory to it in the calling workflow');
+        expect(result.calls).toEqual([]);
+        expect(existsSync(join(site.root, 'composer.lock'))).toBe(false);
     });
 });

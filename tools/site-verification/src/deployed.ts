@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import type { Abort } from './manifest';
 
@@ -12,10 +13,13 @@ import type { Abort } from './manifest';
  * environment reports the versions the commit's `composer.lock` records, and gives up as
  * inconclusive when it never does.
  *
- * What this can see is bounded by what the plugin reports, which is Craft and each installed plugin
- * by version. A commit that changes no reported package (a template edit, say) is indistinguishable
- * from the commit before it, so the guard is satisfied at once; it is a guard for the case that
- * matters to a remediation, where the lock file always moves.
+ * The environment says what it is running in up to three ways, and the strongest one both sides
+ * know decides. A plugin from 1.8.3 (API 1.6.0) reports the deployed commit when it can find one,
+ * which settles the question exactly, and a fingerprint of the package versions its composer.lock
+ * pins, which proves the dependency change arrived but cannot tell apart two commits that pin the
+ * same packages. An older plugin reports only Craft and each installed plugin by version, and then
+ * the versions in the lock file are compared. A reported commit is never overridden by a weaker
+ * signal: if it differs, the runner keeps waiting whatever the versions say.
  */
 
 /** Versions by Composer name, as a lock file records them. */
@@ -43,9 +47,99 @@ export function readLockVersions(lock: unknown): Record<string, string> {
     return versions;
 }
 
-export function readLockFile(path: string): Record<string, string> {
-    return readLockVersions(JSON.parse(readFileSync(path, 'utf8')) as unknown);
+/** What the environment should report once it is running the commit the comparison is about. */
+export interface ExpectedRevision {
+    /** Versions by Composer name, from the commit's composer.lock. */
+    versions: Record<string, string>;
+    /** That lock file's fingerprint (see `fingerprintLock`), or null when it locks nothing. */
+    lockHash: string | null;
+    /** The commit's SHA, or null when the caller did not say. */
+    commit: string | null;
 }
+
+/** What the environment reported on one poll. */
+export interface ReportedRevision {
+    versions: Record<string, string>;
+    lockHash: string | null;
+    commit: string | null;
+}
+
+export type Signal = 'commit' | 'lock_hash' | 'versions';
+
+const hex = (value: unknown, pattern: RegExp): string | null =>
+    typeof value === 'string' && pattern.test(value.trim()) ? value.trim().toLowerCase() : null;
+
+/** A 7-to-40 character hex SHA, lowercased, or null. */
+export const asCommit = (value: unknown): string | null => hex(value, /^[0-9a-f]{7,40}$/i);
+
+/** A lock fingerprint as the plugin reports it, lowercased, or null. */
+export const asLockHash = (value: unknown): string | null => hex(value, /^[0-9a-f]{64}$/i);
+
+/**
+ * A SHA-256 of every locked package, as one `name version reference` line each, sorted.
+ *
+ * Must stay in step with `RevisionResolver::fingerprintLock()` in the plugin, which computes the
+ * same thing from the lock file the environment is running; a shared fixture in both test suites
+ * pins the result. It is not Composer's `content-hash`, which covers only composer.json and so
+ * stays the same when a security update moves locked versions. The reference is the source or
+ * dist commit, which is what moves when a `dev-` branch is updated under the same version string.
+ */
+export function fingerprintLock(lock: unknown): string | null {
+    if (lock === null || typeof lock !== 'object' || Array.isArray(lock)) {
+        return null;
+    }
+
+    const lines: string[] = [];
+
+    for (const key of ['packages', 'packages-dev'] as const) {
+        const list = (lock as Record<string, unknown>)[key];
+
+        for (const entry of Array.isArray(list) ? (list as Record<string, unknown>[]) : []) {
+            if (typeof entry?.name !== 'string' || typeof entry.version !== 'string') {
+                continue;
+            }
+
+            const source = entry.source as { reference?: unknown } | undefined;
+            const dist = entry.dist as { reference?: unknown } | undefined;
+            const reference = source?.reference ?? dist?.reference ?? '';
+
+            lines.push(`${entry.name} ${entry.version} ${typeof reference === 'string' ? reference : ''}`);
+        }
+    }
+
+    if (lines.length === 0) {
+        return null;
+    }
+
+    // Byte order, as PHP's sort(SORT_STRING) gives; package names and versions are ASCII.
+    lines.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+
+    return createHash('sha256').update(lines.join('\n')).digest('hex');
+}
+
+/** Reads the expected versions and fingerprint from a lock file, with the commit it came from. */
+export function readExpectedLock(path: string, commit: string | null): ExpectedRevision {
+    const lock = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+
+    return { versions: readLockVersions(lock), lockHash: fingerprintLock(lock), commit: asCommit(commit) };
+}
+
+/** The `revision` object a 1.8.3 plugin reports, read defensively; an older plugin has none. */
+export function readReportedRevision(payload: Record<string, unknown>): { lockHash: string | null; commit: string | null } {
+    const revision = payload.revision;
+
+    if (revision === null || typeof revision !== 'object' || Array.isArray(revision)) {
+        return { lockHash: null, commit: null };
+    }
+
+    return { lockHash: asLockHash((revision as Record<string, unknown>).lock_hash), commit: asCommit((revision as Record<string, unknown>).commit) };
+}
+
+/**
+ * Two SHAs name the same commit when one is a prefix of the other. A REVISION file may hold an
+ * abbreviated SHA where the caller knows the full one; both are at least seven characters.
+ */
+export const sameCommit = (a: string, b: string): boolean => a.startsWith(b) || b.startsWith(a);
 
 export interface LockMismatch {
     name: string;
@@ -80,9 +174,39 @@ export function lockMismatches(lock: Record<string, string>, reported: Record<st
         .map((name) => ({ name, wanted: lock[name] ?? null, reported: reported[name] ?? null }));
 }
 
+/** One poll's verdict: which signal decided it, and whether it matched. */
+export interface Decision {
+    signal: Signal;
+    deployed: boolean;
+    /** What was expected and reported under that signal, for the message when the wait times out. */
+    expected: string | null;
+    reported: string | null;
+    /** For the versions signal only: the packages that disagreed. */
+    mismatches: LockMismatch[];
+}
+
+/**
+ * Decides one poll by the strongest signal both sides have. The commit decides when the
+ * environment reports one and the caller named one; otherwise the lock hash when both have it;
+ * otherwise the versions, which is what an older plugin offers.
+ */
+export function decide(expected: ExpectedRevision, reported: ReportedRevision): Decision {
+    if (reported.commit !== null && expected.commit !== null) {
+        return { signal: 'commit', deployed: sameCommit(reported.commit, expected.commit), expected: expected.commit, reported: reported.commit, mismatches: [] };
+    }
+
+    if (reported.lockHash !== null && expected.lockHash !== null) {
+        return { signal: 'lock_hash', deployed: reported.lockHash === expected.lockHash, expected: expected.lockHash, reported: reported.lockHash, mismatches: [] };
+    }
+
+    const mismatches = lockMismatches(expected.versions, reported.versions);
+
+    return { signal: 'versions', deployed: mismatches.length === 0, expected: null, reported: null, mismatches };
+}
+
 export type WaitOutcome =
-    | { deployed: true; polls: number }
-    | { deployed: false; polls: number; mismatches: LockMismatch[]; lastError: string | null };
+    | { deployed: true; polls: number; confirmedBy: Signal; value: string | null }
+    | { deployed: false; polls: number; last: Decision | null; lastError: string | null };
 
 export interface WaitOptions {
     timeoutMs: number;
@@ -93,22 +217,22 @@ export interface WaitOptions {
 }
 
 /**
- * Polls until the environment reports what the lock file records, or the timeout passes.
+ * Polls until the environment reports what the commit's lock file records, or the timeout passes.
  *
- * `poll` returns the versions the environment reports, or a sentence saying why it could not be
- * read. A site mid-deploy commonly answers with an error page for a while, so an unreadable report
- * is a reason to keep waiting, not to stop.
+ * `poll` returns what the environment reports, or a sentence saying why it could not be read. A
+ * site mid-deploy commonly answers with an error page for a while, so an unreadable report is a
+ * reason to keep waiting, not to stop.
  */
 export async function waitForLock(
-    lock: Record<string, string>,
-    poll: () => Promise<Record<string, string> | string>,
+    expected: ExpectedRevision,
+    poll: () => Promise<ReportedRevision | string>,
     options: WaitOptions,
 ): Promise<WaitOutcome> {
     const now = options.now ?? Date.now;
     const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
     const deadline = now() + options.timeoutMs;
     let polls = 0;
-    let mismatches: LockMismatch[] = [];
+    let last: Decision | null = null;
     let lastError: string | null = null;
 
     for (;;) {
@@ -117,19 +241,19 @@ export async function waitForLock(
 
         if (typeof reported === 'string') {
             lastError = reported;
-        } else if (Object.keys(reported).length === 0) {
-            lastError = 'The environment reported no package versions.';
+        } else if (Object.keys(reported.versions).length === 0 && reported.commit === null && reported.lockHash === null) {
+            lastError = 'The environment reported no package versions and no revision.';
         } else {
             lastError = null;
-            mismatches = lockMismatches(lock, reported);
+            last = decide(expected, reported);
 
-            if (mismatches.length === 0) {
-                return { deployed: true, polls };
+            if (last.deployed) {
+                return { deployed: true, polls, confirmedBy: last.signal, value: last.expected };
             }
         }
 
         if (now() + options.intervalMs > deadline) {
-            return { deployed: false, polls, mismatches, lastError };
+            return { deployed: false, polls, last, lastError };
         }
 
         await sleep(options.intervalMs);
@@ -145,10 +269,15 @@ export async function waitForLock(
 export function notDeployedAbort(outcome: Extract<WaitOutcome, { deployed: false }>, origin: string, lockRef: string, timeoutMs: number): Abort {
     const waited = `${Math.round(timeoutMs / 1000)}s`;
     const detail = [`${origin} was not running ${lockRef} after ${waited}, so the comparison would not have been of that commit.`];
+    const last = outcome.last;
 
-    if (outcome.mismatches.length > 0) {
+    if (last?.signal === 'commit') {
+        detail.push(`Waiting for commit ${last.expected} (reported ${last.reported}).`);
+    } else if (last?.signal === 'lock_hash') {
+        detail.push(`Waiting for lock file hash ${last.expected} (reported ${last.reported}).`);
+    } else if (last !== null && last.mismatches.length > 0) {
         detail.push(
-            `Waiting for ${outcome.mismatches
+            `Waiting for ${last.mismatches
                 .map((entry) =>
                     entry.wanted === null
                         ? `${entry.name} to be removed (still ${entry.reported})`
@@ -163,4 +292,11 @@ export function notDeployedAbort(outcome: Extract<WaitOutcome, { deployed: false
     }
 
     return { reason: 'not_deployed', detail };
+}
+
+/** How a confirmed deploy is recorded beside the run, for the reporter and the CI summary. */
+export interface DeployConfirmation {
+    confirmed_by: Signal;
+    /** The commit or lock hash that matched; null when the versions did. */
+    value: string | null;
 }

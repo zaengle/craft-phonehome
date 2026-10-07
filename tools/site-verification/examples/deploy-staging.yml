@@ -4,12 +4,16 @@
 #
 # The contract is three sentences. It can be started by workflow_dispatch on any ref. It deploys
 # the ref it was started on to the staging environment Phone Home verifies against. It exits
-# non-zero if that did not happen, and it does not exit at all until it has.
+# non-zero when it knows the deploy failed.
 #
-# The last sentence is the one that gets missed. A deploy hook that answers 200 and then deploys in
-# the background satisfies the second sentence and breaks the third: the remediation workflow
-# would see this job succeed, compare staging before the change reached it, and report a clean
-# result about the old code. Wait for the deploy to finish, by whatever means the deploy provides.
+# This workflow finishing is not what proves the environment is running the ref. The environment
+# says so itself: the plugin reports the commit it is running, or its lock file's hash, and before
+# comparing anything the remediation workflow waits, up to its deploy_timeout, until it reports the
+# ref this workflow was started on. So a deploy hook that answers when the deploy is queued rather
+# than when it is live does not produce a wrong result; it makes the comparison wait longer.
+#
+# Where the host can say when a deploy has finished, wait for that here anyway, because it makes
+# the comparison prompt and lets this workflow fail when the deploy does.
 name: Deploy to staging
 
 on:

@@ -1,5 +1,8 @@
 import { expect, test } from '@playwright/test';
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 /**
  * The invariants the remediation workflow is built on, read off the file rather than trusted to
@@ -69,7 +72,9 @@ test('the runner follows the workflow file it was released with', () => {
     expect(remediate).toContain('RUNNER_REF: ${{ inputs.runner_ref || job.workflow_sha }}');
     expect(remediate).toContain('runner_ref=$RUNNER_REF');
     expect(remediate).not.toContain('job_workflow_sha');
-    expect(remediate.match(/^\s+ref: \$\{\{ needs\.check\.outputs\.runner_ref \}\}$/gm)?.length ?? 0).toBe(2);
+    // Every checkout of the runner (prepare, deploy and pull_request) takes the pinned commit.
+    expect(remediate.match(/^\s+repository: zaengle\/craft-phonehome$/gm)?.length ?? 0).toBe(3);
+    expect(remediate.match(/^\s+repository: zaengle\/craft-phonehome\n\s+ref: \$\{\{ needs\.check\.outputs\.runner_ref \}\}$/gm)?.length ?? 0).toBe(3);
     expect(remediate.match(/^\s+runner_ref: \$\{\{ needs\.check\.outputs\.runner_ref \}\}$/gm)?.length ?? 0).toBe(2);
     expect(verification).toContain('${{ inputs.runner_ref || job.workflow_sha }}');
 });
@@ -194,6 +199,86 @@ test('caller input is passed through the environment instead of inserted into sh
             expect(script).not.toContain('${{');
         }
     }
+});
+
+test('the example callers pin the shared workflows to one release tag, never a branch', () => {
+    // The pilot's callers named the feature branch, which has since been released and deleted. A
+    // site copies these files, so what they reference is what a new site runs.
+    const examples = ['remediate.yml', 'verify-on-deploy.yml'].map((name) => readFileSync(new URL(`../../examples/${name}`, import.meta.url).pathname, 'utf8'));
+    const refs = examples.flatMap((text) => [...text.matchAll(/uses: zaengle\/craft-phonehome\/\.github\/workflows\/[a-z-]+\.yml@(\S+)/g)].map((match) => match[1]));
+
+    expect(refs).toHaveLength(3);
+    expect(new Set(refs)).toEqual(new Set(['1.8.3']));
+});
+
+test('every step that touches composer.json or composer.lock runs inside working_directory', () => {
+    // A site that keeps its Craft application in `src/` has no Composer files at the repository
+    // root, so any step left at the root would fail there or write a lock file nobody deploys.
+    const steps = job('prepare').split(/\n {6}- /).slice(1);
+    const touching = steps.filter((step) => /composer|resolve-change\.sh/.test(step) && !step.startsWith('uses: shivammathur'));
+
+    expect(touching.map((step) => step.match(/^name: (.*)/)?.[1])).toEqual(['Resolve the change', 'Push the branch']);
+
+    for (const step of touching) {
+        expect(step).toContain('working-directory: ${{ inputs.working_directory }}');
+    }
+
+    expect(job('prepare')).toContain('bash "$GITHUB_WORKSPACE/.phonehome-runner/tools/site-verification/ci/resolve-change.sh"');
+    expect(job('prepare')).toContain('git add composer.lock composer.json');
+    expect(remediate).toMatch(/\n {6}working_directory:\n(?: {8}.*\n)*? {8}default: '\.'\n/);
+    // The comparison waits for the lock file in the same directory.
+    expect(job('verify')).toContain('lock_path: ${{ needs.check.outputs.lock_path }}');
+});
+
+test('the lock file path is spelled so the comparison checkout can match it', () => {
+    // Taken from the workflow and run, because `./composer.lock` or `src//composer.lock` match no
+    // file as a sparse-checkout pattern and the comparison would wait on a lock file it never read.
+    const script = job('check').match(/- name: Locate the lock file\n(?:.*\n)*? {8}run: \|\n((?: {10}.*\n)+)/)?.[1].replace(/^ {10}/gm, '') ?? '';
+
+    expect(script).not.toBe('');
+
+    const lockPath = (dir: string) => {
+        const outputs = join(mkdtempSync(join(tmpdir(), 'phv-lock-')), 'outputs');
+        writeFileSync(outputs, '');
+        spawnSync('bash', ['-c', script], { env: { PATH: process.env.PATH ?? '', GITHUB_OUTPUT: outputs, WORKING_DIRECTORY: dir } });
+
+        return readFileSync(outputs, 'utf8');
+    };
+
+    for (const dir of ['.', './', '']) {
+        expect(lockPath(dir)).toBe('lock_path=composer.lock\n');
+    }
+
+    for (const dir of ['src', 'src/', './src']) {
+        expect(lockPath(dir)).toBe('lock_path=src/composer.lock\n');
+    }
+});
+
+test('how far the Composer update reached is carried into the pull request body', () => {
+    expect(job('prepare')).toContain('scope: ${{ steps.resolve.outputs.scope }}');
+    expect(job('prepare')).toContain('scope_reason: ${{ steps.resolve.outputs.scope_reason }}');
+    expect(job('pull_request')).toContain('SCOPE: ${{ needs.prepare.outputs.scope }}');
+    expect(job('pull_request')).toContain('SCOPE_REASON: ${{ needs.prepare.outputs.scope_reason }}');
+});
+
+test('the pull request step can link the patch even when Phone Home could not be reached', () => {
+    expect(job('pull_request')).toContain('DASHBOARD_ORIGIN: ${{ inputs.dashboard_origin }}');
+    expect(remediate).not.toMatch(/patch #\$/);
+});
+
+test('the comparison is told the commit it waits for, and says how the deploy was confirmed', () => {
+    expect(verification).toContain('PHV_EXPECT_COMMIT: ${{ steps.commit.outputs.sha }}');
+    expect(verification).toContain('CHECKED_OUT: ${{ steps.lock.outputs.commit }}');
+
+    for (const output of ['deploy_confirmed_by', 'deploy_confirmation']) {
+        expect(verification).toContain(`value: \${{ jobs.verify.outputs.${output} }}`);
+        expect(verification).toContain(`${output}: \${{ steps.summary.outputs.${output} }}`);
+    }
+
+    expect(job('pull_request')).toContain('DEPLOY_CONFIRMED_BY: ${{ needs.verify.outputs.deploy_confirmed_by }}');
+    expect(job('pull_request')).toContain('DEPLOY_CONFIRMATION: ${{ needs.verify.outputs.deploy_confirmation }}');
+    // A deploy workflow that failed is still a failed deploy, whatever the environment reports.
+    expect(job('verify')).toContain("needs.deploy.result == 'success'");
 });
 
 test('the Playwright image matches the Playwright the runner installs', () => {

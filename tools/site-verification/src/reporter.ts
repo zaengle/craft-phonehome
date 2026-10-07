@@ -2,6 +2,7 @@ import type { FullResult, Reporter, TestCase, TestResult } from '@playwright/tes
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runConfig } from './config';
+import type { DeployConfirmation } from './deployed';
 import { bundlePaths, findArtifacts, postArtifact, pushBaseline, reportRun, type CaptureRecord, type EnvironmentDelta } from './manifest';
 
 /**
@@ -84,6 +85,7 @@ export default class VerificationReporter implements Reporter {
         const change = this.readJson<unknown>(this.paths.change, sidecarErrors, 'change');
         const drift = this.readJson<string[]>(this.paths.drift, sidecarErrors, 'manifest_drift') ?? [];
         const environment = this.readJson<EnvironmentDelta>(this.paths.environment, sidecarErrors, 'environment_delta');
+        const deploy = this.readJson<DeployConfirmation>(this.paths.deploy, sidecarErrors, 'deploy_confirmation');
 
         this.gateOnEnvironment(environment);
 
@@ -138,6 +140,10 @@ export default class VerificationReporter implements Reporter {
             // version. This is the evidence that the change reached the environment; the lock
             // file above only says it reached a branch.
             environment_delta: environment,
+            // How the environment confirmed it was running the commit before the after side was
+            // captured: by the commit itself, by its lock file's hash, or by the package versions.
+            // Null when the comparison did not wait for a deploy.
+            deploy_confirmation: deploy,
             // Recorded, not acted on: the run used the frozen definitions either way, and an
             // operator reading a clean result needs to know the site has since been redefined.
             manifest_drift: drift,
