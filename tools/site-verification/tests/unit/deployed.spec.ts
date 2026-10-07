@@ -1,5 +1,18 @@
 import { expect, test } from '@playwright/test';
-import { lockMismatches, notDeployedAbort, readLockVersions, waitForLock } from '../../src/deployed';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+    decide,
+    lockMismatches,
+    notDeployedAbort,
+    readExpectedLock,
+    readLockVersions,
+    readReportedRevision,
+    waitForLock,
+    type ExpectedRevision,
+    type ReportedRevision,
+} from '../../src/deployed';
 
 /**
  * The wait between a push and the comparison of what it deployed. On the pilot the comparison ran
@@ -65,28 +78,107 @@ test.describe('lockMismatches', () => {
     });
 });
 
+const COMMIT = 'dca2ad2f0c6b8e1a4b3c5d7e9f0a1b2c3d4e5f60';
+const OTHER_COMMIT = '1111111111111111111111111111111111111111';
+const HASH = '3f2b6c0e8d1a4b5c9e7f60718293a4b5';
+const OTHER_HASH = '00000000000000000000000000000000';
+
+const expected: ExpectedRevision = { versions: lock, lockHash: HASH, commit: COMMIT };
+const matchingVersions = { 'craftcms/cms': '5.8.15', 'verbb/formie': '3.0.4' };
+const oldVersions = { 'craftcms/cms': '5.8.14', 'verbb/formie': '3.0.4' };
+
+/** What an environment reports: versions always, a revision only from a 1.8.3 plugin. */
+const report = (versions: Record<string, string>, revision: Partial<Omit<ReportedRevision, 'versions'>> = {}): ReportedRevision => ({
+    versions,
+    lockHash: revision.lockHash ?? null,
+    commit: revision.commit ?? null,
+});
+
+test.describe('readExpectedLock and readReportedRevision', () => {
+    test('the expected side carries the lock file\'s content-hash and the commit it came from', () => {
+        const path = join(mkdtempSync(join(tmpdir(), 'phv-lock-')), 'composer.lock');
+        writeFileSync(path, JSON.stringify({ 'content-hash': HASH.toUpperCase(), packages: [{ name: 'craftcms/cms', version: '5.8.15' }] }));
+
+        expect(readExpectedLock(path, COMMIT.toUpperCase())).toEqual({ versions: { 'craftcms/cms': '5.8.15' }, lockHash: HASH, commit: COMMIT });
+        expect(readExpectedLock(path, 'main').commit).toBeNull();
+    });
+
+    test('a report without a revision object, from an older plugin, has neither field', () => {
+        expect(readReportedRevision({ craft_version: '5.8.15' })).toEqual({ lockHash: null, commit: null });
+        expect(readReportedRevision({ revision: 'nope' })).toEqual({ lockHash: null, commit: null });
+        expect(readReportedRevision({ revision: { lock_hash: HASH, commit: COMMIT, commit_source: 'git' } })).toEqual({ lockHash: HASH, commit: COMMIT });
+        expect(readReportedRevision({ revision: { lock_hash: 'short', commit: 'main' } })).toEqual({ lockHash: null, commit: null });
+    });
+});
+
+test.describe('decide', () => {
+    test('a reported commit decides, and a different one keeps the runner waiting whatever the versions say', () => {
+        // The case the versions could never catch: a commit that moved no package.
+        expect(decide(expected, report(matchingVersions, { commit: OTHER_COMMIT, lockHash: HASH }))).toMatchObject({
+            signal: 'commit',
+            deployed: false,
+            expected: COMMIT,
+            reported: OTHER_COMMIT,
+        });
+        expect(decide(expected, report(oldVersions, { commit: COMMIT }))).toMatchObject({ signal: 'commit', deployed: true });
+    });
+
+    test('an abbreviated commit matches the full one it abbreviates', () => {
+        expect(decide(expected, report({}, { commit: 'dca2ad2' }))).toMatchObject({ signal: 'commit', deployed: true });
+        expect(decide(expected, report({}, { commit: 'dca2ad3' }))).toMatchObject({ signal: 'commit', deployed: false });
+    });
+
+    test('with no commit reported, the lock hash decides', () => {
+        expect(decide(expected, report(oldVersions, { lockHash: HASH }))).toMatchObject({ signal: 'lock_hash', deployed: true });
+        expect(decide(expected, report(matchingVersions, { lockHash: OTHER_HASH }))).toMatchObject({ signal: 'lock_hash', deployed: false, reported: OTHER_HASH });
+    });
+
+    test('a commit the caller did not name cannot decide, so the lock hash does', () => {
+        expect(decide({ ...expected, commit: null }, report(oldVersions, { commit: COMMIT, lockHash: HASH }))).toMatchObject({ signal: 'lock_hash', deployed: true });
+    });
+
+    test('an older plugin with neither falls back to the versions', () => {
+        expect(decide(expected, report(matchingVersions))).toMatchObject({ signal: 'versions', deployed: true });
+        expect(decide(expected, report(oldVersions))).toMatchObject({
+            signal: 'versions',
+            deployed: false,
+            mismatches: [{ name: 'craftcms/cms', wanted: '5.8.15', reported: '5.8.14' }],
+        });
+    });
+});
+
 test.describe('waitForLock', () => {
-    test('keeps waiting while the environment reports other versions, and stops once it matches', async () => {
+    test('keeps waiting through other commits and unreadable reports, and says what confirmed it', async () => {
         const clock = fakeClock();
-        const reports = [{ 'craftcms/cms': '5.8.14' }, 'api_unavailable: The plugin API answered 502.', { 'craftcms/cms': '5.8.15' }];
+        const reports = [report(matchingVersions, { commit: OTHER_COMMIT }), 'api_unavailable: The plugin API answered 502.', report(matchingVersions, { commit: COMMIT })];
         let polled = 0;
 
-        const outcome = await waitForLock(lock, async () => reports[polled++], { timeoutMs: 60_000, intervalMs: 10_000, ...clock });
+        const outcome = await waitForLock(expected, async () => reports[polled++], { timeoutMs: 60_000, intervalMs: 10_000, ...clock });
 
-        expect(outcome).toEqual({ deployed: true, polls: 3 });
+        expect(outcome).toEqual({ deployed: true, polls: 3, confirmedBy: 'commit', value: COMMIT });
         expect(clock.slept).toEqual([10_000, 10_000]);
     });
 
-    test('times out when the environment never reports the lock file, naming what it waited for', async () => {
+    test('an older plugin is still waited for by its versions', async () => {
+        const clock = fakeClock();
+        const reports = [report(oldVersions), report(matchingVersions)];
+        let polled = 0;
+
+        const outcome = await waitForLock(expected, async () => reports[polled++], { timeoutMs: 60_000, intervalMs: 10_000, ...clock });
+
+        expect(outcome).toEqual({ deployed: true, polls: 2, confirmedBy: 'versions', value: null });
+    });
+
+    test('times out naming the commit it waited for and the one reported', async () => {
         const clock = fakeClock();
         let polled = 0;
 
         const outcome = await waitForLock(
-            lock,
+            expected,
             async () => {
                 polled++;
 
-                return { 'craftcms/cms': '5.8.14', 'verbb/formie': '3.0.4' };
+                return report(matchingVersions, { commit: OTHER_COMMIT });
             },
             { timeoutMs: 30_000, intervalMs: 10_000, ...clock },
         );
@@ -104,16 +196,31 @@ test.describe('waitForLock', () => {
         expect(refusal.reason).toBe('not_deployed');
         expect(refusal.detail.join(' ')).toBe(
             'https://staging.example was not running dca2ad2 after 30s, so the comparison would not have been of that commit. ' +
-                'Waiting for craftcms/cms 5.8.15 (reported 5.8.14).',
+                `Waiting for commit ${COMMIT} (reported ${OTHER_COMMIT}).`,
         );
+    });
+
+    test('times out naming the lock file hash, or the versions for an older plugin', async () => {
+        for (const [reported, sentence] of [
+            [report(oldVersions, { lockHash: OTHER_HASH }), `Waiting for lock file hash ${HASH} (reported ${OTHER_HASH}).`],
+            [report(oldVersions), 'Waiting for craftcms/cms 5.8.15 (reported 5.8.14).'],
+        ] as const) {
+            const outcome = await waitForLock(expected, async () => reported, { timeoutMs: 10_000, intervalMs: 10_000, ...fakeClock() });
+
+            expect(outcome.deployed).toBe(false);
+
+            if (!outcome.deployed) {
+                expect(notDeployedAbort(outcome, 'https://staging.example', 'main', 10_000).detail).toContain(sentence);
+            }
+        }
     });
 
     test('an environment that never answers is waited on, and the last error is kept', async () => {
         const clock = fakeClock();
 
-        const outcome = await waitForLock(lock, async () => 'api_unavailable: The plugin API answered 503.', { timeoutMs: 20_000, intervalMs: 10_000, ...clock });
+        const outcome = await waitForLock(expected, async () => 'api_unavailable: The plugin API answered 503.', { timeoutMs: 20_000, intervalMs: 10_000, ...clock });
 
-        expect(outcome).toEqual({ deployed: false, polls: 3, mismatches: [], lastError: 'api_unavailable: The plugin API answered 503.' });
+        expect(outcome).toEqual({ deployed: false, polls: 3, last: null, lastError: 'api_unavailable: The plugin API answered 503.' });
 
         if (!outcome.deployed) {
             expect(notDeployedAbort(outcome, 'https://staging.example', 'main', 20_000).detail).toContain(

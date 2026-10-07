@@ -453,6 +453,22 @@ test.describe('summarise.mjs', () => {
         expect(stdout).toContain('Use "Re-run all jobs" so the baseline is captured again.');
     });
 
+    test('how the environment confirmed the deploy is published and stated', () => {
+        const commit = summarise({ overall: 'passed', checks: [], deploy_confirmation: { confirmed_by: 'commit', value: 'dca2ad2f0c6b' } });
+
+        expect(commit.outputs).toContain('deploy_confirmed_by=commit\ndeploy_confirmation=the environment reported commit dca2ad2f0c6b\n');
+        expect(commit.stdout).toContain('Before comparing, the environment reported commit dca2ad2f0c6b.');
+
+        expect(summarise({ overall: 'passed', checks: [], deploy_confirmation: { confirmed_by: 'lock_hash', value: '3f2b' } }).outputs).toContain(
+            'deploy_confirmation=the environment reported lock file hash 3f2b\n',
+        );
+        expect(summarise({ overall: 'passed', checks: [], deploy_confirmation: { confirmed_by: 'versions', value: null } }).outputs).toContain(
+            'deploy_confirmation=the environment reported the Craft and plugin versions in the lock file\n',
+        );
+        // A capture, or a comparison that did not wait, says nothing about a deploy.
+        expect(summarise({ overall: 'passed', checks: [] }).outputs).toContain('deploy_confirmed_by=\ndeploy_confirmation=\n');
+    });
+
     test('a capture has no environment line', () => {
         expect(summarise({ overall: 'passed', checks: [] }).outputs).toContain('environment=\n');
     });
@@ -465,6 +481,7 @@ test.describe('summarise.mjs', () => {
 
         expect(run.status).toBe(0);
         expect(readFileSync(outputs, 'utf8')).toContain('overall=\nsummary=The run produced no result, so nothing was verified.\n');
+        expect(readFileSync(outputs, 'utf8')).toContain('deploy_confirmed_by=\n');
     });
 
     test('a newline in a diagnostic cannot break a workflow output', () => {
