@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { asCommit } from './deployed';
 
 /**
  * Run configuration, read once from the environment.
@@ -82,6 +83,11 @@ export interface RunConfig {
     expectLock: string | null;
     /** What `expectLock` was read from, for the sentence that explains a wait that timed out. */
     expectLockRef: string | null;
+    /**
+     * The SHA of the commit `expectLock` was read from. When the environment reports the commit it
+     * is running, this is what it must report; it decides the wait over any weaker signal.
+     */
+    expectCommit: string | null;
     /** How long to wait for the environment to report `expectLock`, and how often to ask. */
     deployTimeoutMs: number;
     deployIntervalMs: number;
@@ -166,6 +172,9 @@ export function runConfig(): RunConfig {
         // same file in every worker.
         expectLock: process.env.PHV_EXPECT_LOCK?.trim() ? resolve(process.env.PHV_EXPECT_LOCK.trim()) : null,
         expectLockRef: process.env.PHV_EXPECT_LOCK_REF?.trim() || null,
+        // Anything that is not a SHA is treated as absent rather than as a commit nothing could
+        // ever match. One definition of a SHA, shared with the wait that compares against it.
+        expectCommit: asCommit(process.env.PHV_EXPECT_COMMIT),
         deployTimeoutMs: Math.max(0, Number(process.env.PHV_DEPLOY_TIMEOUT ?? 900)) * 1000,
         deployIntervalMs: Math.max(1, Number(process.env.PHV_DEPLOY_INTERVAL ?? 15)) * 1000,
         // Resolved here rather than at each use. Two callers each defaulting to Date.now() disagree

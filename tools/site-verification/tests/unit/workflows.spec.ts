@@ -208,7 +208,7 @@ test('the example callers pin the shared workflows to one release tag, never a b
     const refs = examples.flatMap((text) => [...text.matchAll(/uses: zaengle\/craft-phonehome\/\.github\/workflows\/[a-z-]+\.yml@(\S+)/g)].map((match) => match[1]));
 
     expect(refs).toHaveLength(3);
-    expect(new Set(refs)).toEqual(new Set(['1.8.2']));
+    expect(new Set(refs)).toEqual(new Set(['1.8.3']));
 });
 
 test('every step that touches composer.json or composer.lock runs inside working_directory', () => {
@@ -259,4 +259,24 @@ test('how far the Composer update reached is carried into the pull request body'
     expect(job('prepare')).toContain('scope_reason: ${{ steps.resolve.outputs.scope_reason }}');
     expect(job('pull_request')).toContain('SCOPE: ${{ needs.prepare.outputs.scope }}');
     expect(job('pull_request')).toContain('SCOPE_REASON: ${{ needs.prepare.outputs.scope_reason }}');
+});
+
+test('the pull request step can link the patch even when Phone Home could not be reached', () => {
+    expect(job('pull_request')).toContain('DASHBOARD_ORIGIN: ${{ inputs.dashboard_origin }}');
+    expect(remediate).not.toMatch(/patch #\$/);
+});
+
+test('the comparison is told the commit it waits for, and says how the deploy was confirmed', () => {
+    expect(verification).toContain('PHV_EXPECT_COMMIT: ${{ steps.commit.outputs.sha }}');
+    expect(verification).toContain('CHECKED_OUT: ${{ steps.lock.outputs.commit }}');
+
+    for (const output of ['deploy_confirmed_by', 'deploy_confirmation']) {
+        expect(verification).toContain(`value: \${{ jobs.verify.outputs.${output} }}`);
+        expect(verification).toContain(`${output}: \${{ steps.summary.outputs.${output} }}`);
+    }
+
+    expect(job('pull_request')).toContain('DEPLOY_CONFIRMED_BY: ${{ needs.verify.outputs.deploy_confirmed_by }}');
+    expect(job('pull_request')).toContain('DEPLOY_CONFIRMATION: ${{ needs.verify.outputs.deploy_confirmation }}');
+    // A deploy workflow that failed is still a failed deploy, whatever the environment reports.
+    expect(job('verify')).toContain("needs.deploy.result == 'success'");
 });

@@ -16,6 +16,7 @@ use Throwable;
 use yii\base\Component;
 use zaengle\phonehome\enums\NpmStatus;
 use zaengle\phonehome\events\RegisterStatusChecksEvent;
+use zaengle\phonehome\helpers\RevisionResolver;
 use zaengle\phonehome\PhoneHome;
 use zaengle\phonehome\statuschecks\StatusCheckInterface;
 
@@ -71,6 +72,7 @@ class Report extends Component
             'environment' => App::env('CRAFT_ENVIRONMENT') ?? 'unknown',
             'dev_mode' => App::devMode(),
             'composer_lock_updated' => $this->fileUpdatedAt(Craft::$app->getComposer()->getLockPath()),
+            'revision' => $this->getRevisionInfo(),
             'npm' => $this->getNpmInfo(),
             'system' => $this->getSystemInfo($expandPhpInfo),
             'plugins' => $this->getPluginsInfo(),
@@ -416,6 +418,33 @@ class Report extends Component
     protected function logError(string $message): void
     {
         PhoneHome::error($message);
+    }
+
+    /**
+     * What the environment is running, so a deployment runner can confirm a deploy from the
+     * environment itself. Every field is null when it cannot be established; this never throws.
+     *
+     * @return array{lock_hash: string|null, commit: string|null, commit_source: string|null}
+     */
+    protected function getRevisionInfo(): array
+    {
+        try {
+            $verification = PhoneHome::$plugin->getSettings()->verification;
+            $env = $verification['revisionEnv'] ?? null;
+            $file = $verification['revisionFile'] ?? null;
+
+            return (new RevisionResolver(
+                root: (string)Craft::getAlias('@root'),
+                lockPath: Craft::$app->getComposer()->getLockPath(),
+                configuredEnv: is_string($env) ? $env : null,
+                configuredFile: is_string($file) ? $file : null,
+                env: fn(string $name): mixed => App::env($name),
+            ))->resolve();
+        } catch (Throwable $e) {
+            $this->logError('Could not establish the revision: ' . $e->getMessage());
+
+            return ['lock_hash' => null, 'commit' => null, 'commit_source' => null];
+        }
     }
 
     protected function fileUpdatedAt(string $path): ?string

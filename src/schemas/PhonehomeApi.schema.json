@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "title": "Phone Home API Response Schema",
   "description": "Schema for the Phone Home API response (output of Report::getInfo() method)",
   "definitions": {
@@ -39,6 +39,7 @@
     "environment",
     "dev_mode",
     "composer_lock_updated",
+    "revision",
     "npm",
     "system",
     "plugins",
@@ -92,6 +93,41 @@
       ],
       "format": "date-time",
       "description": "The timestamp when the composer.lock file was last updated, or null if it cannot be read"
+    },
+    "revision": {
+      "type": "object",
+      "description": "What the environment is running, so a deployment can be confirmed by the environment itself. Every field is null when it cannot be established.",
+      "required": [
+        "lock_hash",
+        "commit",
+        "commit_source"
+      ],
+      "properties": {
+        "lock_hash": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "A SHA-256 of every package composer.lock pins, one 'name version reference' line each, sorted and joined with newlines; null if the lock file cannot be read or locks nothing. Not Composer's content-hash, which covers only composer.json and does not change when an update moves locked versions"
+        },
+        "commit": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{7,40}$",
+          "description": "The deployed commit's SHA, lowercased, from the first source that answers: the site's verification.revisionEnv, its verification.revisionFile, the PHONE_HOME_REVISION environment variable, a REVISION file at the project root, then .git/HEAD; null when none does"
+        },
+        "commit_source": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Which source supplied the commit: env:NAME, file:path or git; null when there is no commit"
+        }
+      },
+      "additionalProperties": false
     },
     "npm": {
       "type": "object",
