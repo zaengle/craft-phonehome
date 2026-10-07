@@ -22,7 +22,8 @@ import {
     pullBaseline,
     type CaptureRecord,
 } from './src/manifest';
-import { notDeployedAbort, readLockFile, waitForLock } from './src/deployed';
+import { describeDeployConfirmation } from './ci/summarise.mjs';
+import { notDeployedAbort, readExpectedLock, readReportedRevision, waitForLock, type DeployConfirmation, type ExpectedRevision } from './src/deployed';
 
 /**
  * The manifest is resolved here, at config load, rather than in a globalSetup hook, because the
@@ -75,6 +76,7 @@ async function prepareBundle(): Promise<void> {
 
     // A stale gate file from an earlier attempt would otherwise be read as this run's outcome.
     rmSync(paths.abort, { force: true });
+    rmSync(paths.deploy, { force: true });
 
     if (config.mode === 'capture') {
         await prepareCapture();
@@ -222,38 +224,42 @@ async function prepareCompare(): Promise<void> {
  * then ends inconclusive naming the versions it waited for, never passed.
  */
 async function waitForDeploy(lockPath: string): Promise<boolean> {
-    let lock: Record<string, string>;
+    let expected: ExpectedRevision;
 
     try {
-        lock = readLockFile(lockPath);
+        expected = readExpectedLock(lockPath, config.expectCommit);
     } catch (error) {
         abort('no_lock', [`Could not read ${lockPath}: ${(error as Error).message}`, 'Without it the runner cannot tell whether the environment is running the commit.']);
 
         return false;
     }
 
-    if (Object.keys(lock).length === 0) {
-        abort('no_lock', [`${lockPath} records no packages, so the runner cannot tell whether the environment is running the commit.`]);
+    if (Object.keys(expected.versions).length === 0 && expected.lockHash === null && expected.commit === null) {
+        abort('no_lock', [`${lockPath} locks no packages and no commit was given, so the runner cannot tell whether the environment is running the commit.`]);
 
         return false;
     }
 
     const ref = config.expectLockRef ?? lockPath;
 
-    process.stdout.write(`Waiting up to ${Math.round(config.deployTimeoutMs / 1000)}s for ${config.origin} to report the versions in ${ref}'s composer.lock\n`);
+    process.stdout.write(`Waiting up to ${Math.round(config.deployTimeoutMs / 1000)}s for ${config.origin} to report that it is running ${ref}\n`);
 
     const outcome = await waitForLock(
-        lock,
+        expected,
         async () => {
             const report = await fetchReport(config.apiOrigin, config.token, config.insecureTls, apiBasicAuth);
 
-            return isAbort(report) ? `${report.reason}: ${report.detail.join(' ')}` : readPackages(report.payload);
+            return isAbort(report) ? `${report.reason}: ${report.detail.join(' ')}` : { versions: readPackages(report.payload), ...readReportedRevision(report.payload) };
         },
         { timeoutMs: config.deployTimeoutMs, intervalMs: config.deployIntervalMs },
     );
 
     if (outcome.deployed) {
-        process.stdout.write(`${config.origin} is running ${ref} (after ${outcome.polls} check(s))\n`);
+        const confirmation: DeployConfirmation = { confirmed_by: outcome.confirmedBy, value: outcome.value };
+
+        // The same phrase the CI summary and the pull request use, from the one place that words it.
+        process.stdout.write(`${config.origin} is running ${ref}: ${describeDeployConfirmation(confirmation)} (after ${outcome.polls} check(s))\n`);
+        writeFileSync(paths.deploy, `${JSON.stringify(confirmation, null, 2)}\n`);
 
         return true;
     }

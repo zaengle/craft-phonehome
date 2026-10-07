@@ -41,6 +41,18 @@ When making a request to the `/actions/phonehome/api` endpoint, you can include 
 A JSON Schema for the API response is available at `/actions/phonehome/schema`. This schema describes the structure of the API response, including the fields and their types. You can use this schema to validate the API response in your integration. To avoid unnecessary leaking information, **requests for the schema still check for a valid token**. You can find a static copy of the schema in the `src/schemas/PhonehomeApi.schema.json` file.
 
 
+## Deployment revision
+
+The `revision` object, added in API version 1.6.0, says what the environment is running, so a deployment can be confirmed by the environment itself rather than by whoever deployed it. Every field is `null` when it cannot be established, and reading it never fails the report.
+
+- `lock_hash` fingerprints the exact package versions `composer.lock` pins. It is a SHA-256 of one `name version reference` line per locked package, including dev packages, sorted and joined with newlines, where the reference is the package's source or dist commit. It needs neither git nor the host. It is deliberately not Composer's own `content-hash`, which covers only `composer.json` and stays the same when an update moves locked versions without touching `composer.json`, as a security update does.
+- `commit` is the deployed commit's SHA, lowercased. It is read from the first of these sources that holds a 7-to-40 character hex string: the environment variable named by `verification.revisionEnv`, the file named by `verification.revisionFile`, the `PHONE_HOME_REVISION` environment variable, a `REVISION` file at the project root (which Envoyer and Capistrano-style deploys write), and finally `.git/HEAD` when the release is a git clone (which Forge produces). Git is read as files; it is never run.
+- `commit_source` names the source that answered, as `env:NAME`, `file:path` or `git`.
+
+Set `PHONE_HOME_REVISION`, or the variable `revisionEnv` names, from the deploy itself, for each release. A value set once in a `.env` file that outlives releases goes on reporting the commit it was set to, and because a reported commit decides the runner's wait, every later comparison then waits until it times out.
+
+The site verification runner waits for the commit when the environment reports one, for the lock hash when it reports only that, and for the Craft and plugin versions when it reports neither, which is what a site on an older plugin gives it. The commit must match the one the runner was given, or abbreviate it. An environment that has already moved on to a later commit does not match, so the comparison ends inconclusive rather than comparing code it was not asked about.
+
 ## Sample API Response
 
  ```json
@@ -54,6 +66,11 @@ A JSON Schema for the API response is available at `/actions/phonehome/schema`. 
     "environment": "development",
     "dev_mode": false,
     "composer_lock_updated": "2025-07-17T11:30:53-04:00",
+    "revision": {
+        "lock_hash": "3f2b6c0e8d1a4b5c9e7f60718293a4b5",
+        "commit": "dca2ad2f0c6b8e1a4b3c5d7e9f0a1b2c3d4e5f60",
+        "commit_source": "file:REVISION"
+    },
     "npm": {
         "status": "ok",
         "package_manager": "npm",

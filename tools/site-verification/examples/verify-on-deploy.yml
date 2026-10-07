@@ -17,13 +17,17 @@
 #     later. A site that has not opted in is reported as disabled, not as an empty passing suite.
 #
 # The comparison waits for the environment, not for the push. Before it captures the after side,
-# the shared workflow polls the site until it reports the Craft and plugin versions recorded in the
-# composer.lock of the commit that started this run, and ends inconclusive, naming the versions it
-# was waiting for, if that has not happened within `deploy_timeout` seconds (900 by default). That
-# holds however this workflow is started, and it is what keeps a host that deploys on its own, as
-# Forge does when it watches a branch, from having the old code compared and the verdict attached
-# to the change. It can only see what the plugin reports, so a push that moves no Craft or plugin
-# version satisfies it at once.
+# the shared workflow polls the site until it reports that it is running the commit that started
+# this run, and ends inconclusive, naming what it was waiting for, if that has not happened within
+# `deploy_timeout` seconds (900 by default). That holds however this workflow is started, and it is
+# what keeps a host that deploys on its own, as Forge does when it watches a branch, from having the
+# old code compared and the verdict attached to the change.
+#
+# A plugin from 1.8.3 reports the commit it is running when it can find one, from a REVISION file,
+# .git/HEAD or a variable the site names, and that settles the wait exactly. Otherwise it reports a
+# fingerprint of the package versions its composer.lock pins, which proves the dependency change
+# arrived but cannot tell apart two commits that pin the same packages. An older plugin reports
+# only Craft and plugin versions, and then a push that moves no version satisfies the wait at once.
 #
 # Where this site's deploy can be started from GitHub, start the pair from the deploy rather than
 # from the push, so the wait is a formality rather than the only safeguard:
@@ -73,10 +77,9 @@ jobs:
 
   baseline:
     needs: pair
-    # Replace RELEASE_TAG_TO_FILL_IN here and in `verify` with the plugin release tag this site
-    # should run, 1.8.0 or later; 1.8.0 is the first release that carries these workflows. A tag,
-    # never a branch: the runner follows this file's commit, so this is the one thing to pin.
-    uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@RELEASE_TAG_TO_FILL_IN
+    # A release tag, never a branch: the runner follows this file's commit, so this is the one thing
+    # to pin. Use the same tag here and in `verify`, and the same one the site's remediate.yml uses.
+    uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@1.8.3
     with:
       mode: capture
       run_id: ${{ needs.pair.outputs.run_id }}
@@ -95,9 +98,13 @@ jobs:
 
   verify:
     needs: [pair, deploy]
-    uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@RELEASE_TAG_TO_FILL_IN # the same tag as `baseline`
+    uses: zaengle/craft-phonehome/.github/workflows/site-verification.yml@1.8.3 # the same tag as `baseline`
     with:
       mode: compare
+      # The lock file the comparison waits for the environment to report. Change it to
+      # 'src/composer.lock', or wherever it lives, when this site keeps its Craft application in a
+      # subdirectory rather than at the repository root.
+      lock_path: composer.lock
       run_id: ${{ needs.pair.outputs.run_id }}
       origin: https://staging.example.com
       dashboard_origin: https://phone-home.example.com

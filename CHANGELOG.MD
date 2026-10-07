@@ -1,6 +1,39 @@
 # Release Notes for Craft Phone Home Plugin
 
-## [1.8.0] - Unreleased
+## [1.8.3] - 2026-10-07
+
+This release lets the environment say exactly what it is running, so a deployment is confirmed by the site itself rather than by whoever deployed it. The API schema moves to 1.6.0. The change is additive, so nothing existing is removed or renamed.
+
+- The report has a new `revision` object.
+  - `lock_hash` is a SHA-256 of the exact package versions the site's composer.lock pins. It is not Composer's `content-hash`, which does not change when an update moves locked versions.
+  - `commit` is the deployed commit's SHA, read from the first source that holds one: an environment variable or file the site names, the `PHONE_HOME_REVISION` environment variable, a `REVISION` file at the project root (which Envoyer and Capistrano-style deploys write), and then `.git/HEAD` when the release is a git clone (which Forge produces). Git is read as files and never run.
+  - `commit_source` says which source answered.
+
+  Every field is null when it cannot be established, and reading it never fails the report.
+- A site can name its own source with `revisionEnv` (an environment variable name) or `revisionFile` (a path relative to the project root) in its `verification` config. A malformed value makes the manifest invalid with an error naming the setting.
+- Before a comparison captures the after side, the runner now waits for the environment to report the commit it was given. When the environment reports no commit, it waits for the lock file's hash. A reported commit that differs keeps the runner waiting, whatever the package versions say. A site on a plugin older than 1.8.3 reports neither, and keeps the version-based wait.
+- The remediation pull request no longer presents the deploy workflow finishing as proof of the deploy. It says that the workflow finished, and how the environment confirmed the change before the comparison: by its commit, its lock file hash or its package versions. The deploy contract in the examples now says the same. A deploy workflow must still fail when it knows the deploy failed, but a hook that answers when the deploy is queued makes the comparison slower, not wrong.
+- The pull request body names the Phone Home patch as a link to its page instead of as `#90`. GitHub turned the bare number into a link to an unrelated issue or pull request with the same number in the site's repository. The remediation commit says "Phone Home patch 90" for the same reason.
+- The example callers now reference the `1.8.3` tag.
+
+## [1.8.2] - 2026-10-06
+
+This release changes how the shared remediation workflow updates Composer. The plugin itself and its API are unchanged, so the API schema stays at 1.5.0.
+
+- A remediation now moves as little as the security release requires. The workflow tries the requested package alone first, then lets its own dependencies move, and lets root requirements such as Craft move only when neither narrower update can be resolved, each time with Composer's `--minimal-changes`. Before this, every update moved every dependency, which turned one plugin release into a 48-package pull request on the first real site.
+- The remediation pull request says how far the update had to reach and quotes the conflict that made it widen, so a reviewer can tell what the release required from what moved alongside it.
+- A Composer failure that is not a dependency conflict, such as a missing credential, now stops the update at once rather than being retried more broadly.
+- The example callers now reference the `1.8.2` tag. A site keeps the old behaviour until its own `remediate.yml` names this tag or a later one.
+
+## [1.8.1] - 2026-10-06
+
+This release changes the shared remediation workflows and the example files a site copies. The plugin itself and its API are unchanged, so the API schema stays at 1.5.0.
+
+- A site that keeps its Craft application in a subdirectory, such as `src/`, can now be remediated. The shared `remediate.yml` takes a `working_directory` input and runs the Composer update, the lock file comparison and the commit of the lock file inside it, and the comparison waits for the lock file found there. A site that leaves the input at the repository root while its Composer files are elsewhere gets an error naming the input, rather than a lock file created at the root.
+- The example `remediate.yml` and `verify-on-deploy.yml` now call the shared workflows at the `1.8.1` tag instead of a placeholder, and show the one line a site in a subdirectory changes in each. A site whose callers still name `feature/verification-manifest-poc` should move them to this tag, because that branch is being retired.
+- The three workflow problems found in the 6 October pilot run were fixed in 1.8.0 and are unchanged here. A comparison waits for the environment to be running the deployed commit, a re-run updates the open pull request rather than failing to open a second one, and every attempt of a remediation has its own run id.
+
+## [1.8.0] - 2026-10-06
 
 This release adds deployment verification and the workflows Phone Home uses to prepare and prove a security remediation. The API schema moves to 1.5.0, which adds the `verification` field and a `package_name` on each plugin; nothing existing is removed or renamed.
 
