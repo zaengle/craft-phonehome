@@ -22,6 +22,7 @@ import {
     pullBaseline,
     type CaptureRecord,
 } from './src/manifest';
+import { describeDeployConfirmation } from './ci/summarise.mjs';
 import { notDeployedAbort, readExpectedLock, readReportedRevision, waitForLock, type DeployConfirmation, type ExpectedRevision } from './src/deployed';
 
 /**
@@ -234,7 +235,7 @@ async function waitForDeploy(lockPath: string): Promise<boolean> {
     }
 
     if (Object.keys(expected.versions).length === 0 && expected.lockHash === null && expected.commit === null) {
-        abort('no_lock', [`${lockPath} records no packages and no content-hash, and no commit was given, so the runner cannot tell whether the environment is running the commit.`]);
+        abort('no_lock', [`${lockPath} locks no packages and no commit was given, so the runner cannot tell whether the environment is running the commit.`]);
 
         return false;
     }
@@ -254,10 +255,11 @@ async function waitForDeploy(lockPath: string): Promise<boolean> {
     );
 
     if (outcome.deployed) {
-        const by = { commit: `commit ${outcome.value}`, lock_hash: `lock file hash ${outcome.value}`, versions: 'the Craft and plugin versions in the lock file' }[outcome.confirmedBy];
+        const confirmation: DeployConfirmation = { confirmed_by: outcome.confirmedBy, value: outcome.value };
 
-        process.stdout.write(`${config.origin} is running ${ref}, confirmed by ${by} (after ${outcome.polls} check(s))\n`);
-        writeFileSync(paths.deploy, `${JSON.stringify({ confirmed_by: outcome.confirmedBy, value: outcome.value } satisfies DeployConfirmation, null, 2)}\n`);
+        // The same phrase the CI summary and the pull request use, from the one place that words it.
+        process.stdout.write(`${config.origin} is running ${ref}: ${describeDeployConfirmation(confirmation)} (after ${outcome.polls} check(s))\n`);
+        writeFileSync(paths.deploy, `${JSON.stringify(confirmation, null, 2)}\n`);
 
         return true;
     }

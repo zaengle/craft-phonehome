@@ -5,7 +5,7 @@
 This release lets the environment say exactly what it is running, so a deployment is confirmed by the site itself rather than by whoever deployed it. The API schema moves to 1.6.0. The change is additive, so nothing existing is removed or renamed.
 
 - The report has a new `revision` object.
-  - `lock_hash` is the `content-hash` of the site's composer.lock.
+  - `lock_hash` is a SHA-256 of the exact package versions the site's composer.lock pins. It is not Composer's `content-hash`, which does not change when an update moves locked versions.
   - `commit` is the deployed commit's SHA, read from the first source that holds one: an environment variable or file the site names, the `PHONE_HOME_REVISION` environment variable, a `REVISION` file at the project root (which Envoyer and Capistrano-style deploys write), and then `.git/HEAD` when the release is a git clone (which Forge produces). Git is read as files and never run.
   - `commit_source` says which source answered.
 

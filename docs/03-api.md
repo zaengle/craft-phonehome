@@ -45,11 +45,13 @@ A JSON Schema for the API response is available at `/actions/phonehome/schema`. 
 
 The `revision` object, added in API version 1.6.0, says what the environment is running, so a deployment can be confirmed by the environment itself rather than by whoever deployed it. Every field is `null` when it cannot be established, and reading it never fails the report.
 
-- `lock_hash` is the `content-hash` Composer wrote into `composer.lock`. It fingerprints the installed dependency set and needs neither git nor the host.
+- `lock_hash` fingerprints the exact package versions `composer.lock` pins. It is a SHA-256 of one `name version reference` line per locked package, including dev packages, sorted and joined with newlines, where the reference is the package's source or dist commit. It needs neither git nor the host. It is deliberately not Composer's own `content-hash`, which covers only `composer.json` and stays the same when an update moves locked versions without touching `composer.json`, as a security update does.
 - `commit` is the deployed commit's SHA, lowercased. It is read from the first of these sources that holds a 7-to-40 character hex string: the environment variable named by `verification.revisionEnv`, the file named by `verification.revisionFile`, the `PHONE_HOME_REVISION` environment variable, a `REVISION` file at the project root (which Envoyer and Capistrano-style deploys write), and finally `.git/HEAD` when the release is a git clone (which Forge produces). Git is read as files; it is never run.
 - `commit_source` names the source that answered, as `env:NAME`, `file:path` or `git`.
 
-The site verification runner waits for the commit when the environment reports one, for the lock hash when it reports only that, and for the Craft and plugin versions when it reports neither, which is what a site on an older plugin gives it.
+Set `PHONE_HOME_REVISION`, or the variable `revisionEnv` names, from the deploy itself, for each release. A value set once in a `.env` file that outlives releases goes on reporting the commit it was set to, and because a reported commit decides the runner's wait, every later comparison then waits until it times out.
+
+The site verification runner waits for the commit when the environment reports one, for the lock hash when it reports only that, and for the Craft and plugin versions when it reports neither, which is what a site on an older plugin gives it. The commit must match the one the runner was given, or abbreviate it. An environment that has already moved on to a later commit does not match, so the comparison ends inconclusive rather than comparing code it was not asked about.
 
 ## Sample API Response
 

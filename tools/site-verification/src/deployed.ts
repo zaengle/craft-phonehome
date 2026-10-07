@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import type { Abort } from './manifest';
 
@@ -14,11 +15,11 @@ import type { Abort } from './manifest';
  *
  * The environment says what it is running in up to three ways, and the strongest one both sides
  * know decides. A plugin from 1.8.3 (API 1.6.0) reports the deployed commit when it can find one,
- * and the `content-hash` of its composer.lock; either settles the question exactly. An older plugin
- * reports only Craft and each installed plugin by version, and then the versions in the lock file
- * are compared, which cannot tell apart two commits that move no reported package. A reported
- * commit is never overridden by a weaker signal: if it differs, the runner keeps waiting whatever
- * the versions say.
+ * which settles the question exactly, and a fingerprint of the package versions its composer.lock
+ * pins, which proves the dependency change arrived but cannot tell apart two commits that pin the
+ * same packages. An older plugin reports only Craft and each installed plugin by version, and then
+ * the versions in the lock file are compared. A reported commit is never overridden by a weaker
+ * signal: if it differs, the runner keeps waiting whatever the versions say.
  */
 
 /** Versions by Composer name, as a lock file records them. */
@@ -50,7 +51,7 @@ export function readLockVersions(lock: unknown): Record<string, string> {
 export interface ExpectedRevision {
     /** Versions by Composer name, from the commit's composer.lock. */
     versions: Record<string, string>;
-    /** That lock file's `content-hash`, or null when it has none. */
+    /** That lock file's fingerprint (see `fingerprintLock`), or null when it locks nothing. */
     lockHash: string | null;
     /** The commit's SHA, or null when the caller did not say. */
     commit: string | null;
@@ -71,15 +72,56 @@ const hex = (value: unknown, pattern: RegExp): string | null =>
 /** A 7-to-40 character hex SHA, lowercased, or null. */
 export const asCommit = (value: unknown): string | null => hex(value, /^[0-9a-f]{7,40}$/i);
 
-/** A Composer content-hash, lowercased, or null. */
-export const asLockHash = (value: unknown): string | null => hex(value, /^[0-9a-f]{32}$/i);
+/** A lock fingerprint as the plugin reports it, lowercased, or null. */
+export const asLockHash = (value: unknown): string | null => hex(value, /^[0-9a-f]{64}$/i);
 
-/** Reads the expected versions and content-hash from a lock file, with the commit it came from. */
+/**
+ * A SHA-256 of every locked package, as one `name version reference` line each, sorted.
+ *
+ * Must stay in step with `RevisionResolver::fingerprintLock()` in the plugin, which computes the
+ * same thing from the lock file the environment is running; a shared fixture in both test suites
+ * pins the result. It is not Composer's `content-hash`, which covers only composer.json and so
+ * stays the same when a security update moves locked versions. The reference is the source or
+ * dist commit, which is what moves when a `dev-` branch is updated under the same version string.
+ */
+export function fingerprintLock(lock: unknown): string | null {
+    if (lock === null || typeof lock !== 'object' || Array.isArray(lock)) {
+        return null;
+    }
+
+    const lines: string[] = [];
+
+    for (const key of ['packages', 'packages-dev'] as const) {
+        const list = (lock as Record<string, unknown>)[key];
+
+        for (const entry of Array.isArray(list) ? (list as Record<string, unknown>[]) : []) {
+            if (typeof entry?.name !== 'string' || typeof entry.version !== 'string') {
+                continue;
+            }
+
+            const source = entry.source as { reference?: unknown } | undefined;
+            const dist = entry.dist as { reference?: unknown } | undefined;
+            const reference = source?.reference ?? dist?.reference ?? '';
+
+            lines.push(`${entry.name} ${entry.version} ${typeof reference === 'string' ? reference : ''}`);
+        }
+    }
+
+    if (lines.length === 0) {
+        return null;
+    }
+
+    // Byte order, as PHP's sort(SORT_STRING) gives; package names and versions are ASCII.
+    lines.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+
+    return createHash('sha256').update(lines.join('\n')).digest('hex');
+}
+
+/** Reads the expected versions and fingerprint from a lock file, with the commit it came from. */
 export function readExpectedLock(path: string, commit: string | null): ExpectedRevision {
     const lock = JSON.parse(readFileSync(path, 'utf8')) as unknown;
-    const lockHash = lock !== null && typeof lock === 'object' ? asLockHash((lock as Record<string, unknown>)['content-hash']) : null;
 
-    return { versions: readLockVersions(lock), lockHash, commit: asCommit(commit) };
+    return { versions: readLockVersions(lock), lockHash: fingerprintLock(lock), commit: asCommit(commit) };
 }
 
 /** The `revision` object a 1.8.3 plugin reports, read defensively; an older plugin has none. */

@@ -114,7 +114,9 @@ elif [ "$DEPLOYED" = "1" ]; then
     if [ -n "$DEPLOY_CONFIRMATION" ]; then
         deployed="${deployed} Before the comparison, ${DEPLOY_CONFIRMATION}, confirming that ${ORIGIN} was running this branch."
     elif [ -n "$VERIFICATION" ]; then
-        deployed="${deployed} The comparison did not record how ${ORIGIN} confirmed it was running this branch."
+        # No confirmation means the environment never reported this branch before the wait gave up,
+        # or the runner predates the wait. Either way nothing confirmed it, and that is what is said.
+        deployed="${deployed} ${ORIGIN} did not confirm that it was running this branch before the comparison, so the result above may not be of this change."
     fi
 elif [ "$DEPLOY_JOB" = "failure" ]; then
     deployed="> [!WARNING]

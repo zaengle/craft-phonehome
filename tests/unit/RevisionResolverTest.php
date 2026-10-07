@@ -64,11 +64,52 @@ class RevisionResolverTest extends TestCase
         $this->assertSame(['lock_hash' => null, 'commit' => null, 'commit_source' => null], $this->resolve());
     }
 
-    public function testTheLockHashIsComposersContentHash(): void
-    {
-        $this->write('composer.lock', json_encode(['content-hash' => 'A1B2C3D4E5F60718293A4B5C6D7E8F90', 'packages' => []]));
+    /** The lock file the parity fixture is built from; the runner's tests pin the same fingerprint. */
+    private const FIXTURE_LOCK = [
+        'content-hash' => 'a1b2',
+        'packages' => [
+            ['name' => 'verbb/formie', 'version' => '3.1.43', 'source' => ['reference' => 'abc123']],
+            ['name' => 'craftcms/cms', 'version' => '5.11.1', 'dist' => ['reference' => 'def456']],
+        ],
+        'packages-dev' => [['name' => 'craftcms/generator', 'version' => '2.1.0']],
+    ];
 
-        $this->assertSame('a1b2c3d4e5f60718293a4b5c6d7e8f90', $this->resolve()['lock_hash']);
+    /** tools/site-verification/tests/unit/deployed.spec.ts expects exactly this for the same lock. */
+    private const FIXTURE_FINGERPRINT = 'cf1210f2911d689f1bed30f33456f7710405cd69ed55eef06702a37ba9f56ade';
+
+    public function testTheLockHashFingerprintsTheLockedPackages(): void
+    {
+        $this->write('composer.lock', json_encode(self::FIXTURE_LOCK));
+
+        $this->assertSame(self::FIXTURE_FINGERPRINT, $this->resolve()['lock_hash']);
+    }
+
+    public function testTheLockHashMovesWhenAVersionMovesEvenThoughContentHashDoesNot(): void
+    {
+        // A security remediation runs `composer update package:version`, which moves locked
+        // versions and leaves composer.json, and so Composer's content-hash, exactly as they were.
+        $moved = self::FIXTURE_LOCK;
+        $moved['packages'][0]['version'] = '3.1.44';
+
+        $this->assertSame(self::FIXTURE_LOCK['content-hash'], $moved['content-hash']);
+        $this->assertNotSame(RevisionResolver::fingerprintLock(self::FIXTURE_LOCK), RevisionResolver::fingerprintLock($moved));
+    }
+
+    public function testTheLockHashMovesWithADevBranchReference(): void
+    {
+        $moved = self::FIXTURE_LOCK;
+        $moved['packages'][0]['source']['reference'] = 'fff999';
+
+        $this->assertNotSame(RevisionResolver::fingerprintLock(self::FIXTURE_LOCK), RevisionResolver::fingerprintLock($moved));
+    }
+
+    public function testTheLockHashDoesNotDependOnOrderOrFormatting(): void
+    {
+        $reordered = self::FIXTURE_LOCK;
+        $reordered['packages'] = array_reverse($reordered['packages']);
+        $reordered['content-hash'] = 'something-else';
+
+        $this->assertSame(self::FIXTURE_FINGERPRINT, RevisionResolver::fingerprintLock($reordered));
     }
 
     public function testAnUnreadableLockFileHasNoHash(): void
@@ -76,7 +117,7 @@ class RevisionResolverTest extends TestCase
         $this->write('composer.lock', '{not json');
         $this->assertNull($this->resolve()['lock_hash']);
 
-        $this->write('composer.lock', json_encode(['content-hash' => 'not-a-hash']));
+        $this->write('composer.lock', json_encode(['content-hash' => 'a1b2', 'packages' => []]));
         $this->assertNull($this->resolve()['lock_hash']);
     }
 

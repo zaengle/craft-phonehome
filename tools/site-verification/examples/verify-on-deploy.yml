@@ -24,9 +24,10 @@
 # old code compared and the verdict attached to the change.
 #
 # A plugin from 1.8.3 reports the commit it is running when it can find one, from a REVISION file,
-# .git/HEAD or a variable the site names, and the hash of its composer.lock otherwise; either is
-# exact. An older plugin reports only Craft and plugin versions, and then a push that moves no
-# version satisfies the wait at once.
+# .git/HEAD or a variable the site names, and that settles the wait exactly. Otherwise it reports a
+# fingerprint of the package versions its composer.lock pins, which proves the dependency change
+# arrived but cannot tell apart two commits that pin the same packages. An older plugin reports
+# only Craft and plugin versions, and then a push that moves no version satisfies the wait at once.
 #
 # Where this site's deploy can be started from GitHub, start the pair from the deploy rather than
 # from the push, so the wait is a formality rather than the only safeguard:

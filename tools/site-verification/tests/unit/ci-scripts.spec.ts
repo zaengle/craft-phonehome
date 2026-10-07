@@ -201,10 +201,14 @@ test.describe('pr-body.sh on how the deploy was confirmed', () => {
         ).toContain('Before the comparison, the environment reported the Craft and plugin versions in the lock file, confirming');
     });
 
-    test('a comparison that recorded no confirmation does not claim one', () => {
-        const body = prBody({ ...verified, DEPLOY_CONFIRMED_BY: '', DEPLOY_CONFIRMATION: '' });
+    test('a comparison whose wait was never confirmed says so, rather than implying it was', () => {
+        // The case the review found: the deploy workflow finished, the wait timed out, and the old
+        // wording read as though staging had confirmed the branch in some unrecorded way.
+        const body = prBody({ ...verified, VERIFICATION: 'inconclusive', DEPLOY_CONFIRMED_BY: '', DEPLOY_CONFIRMATION: '' });
 
-        expect(body).toContain('The comparison did not record how https://staging.example confirmed it was running this branch.');
+        expect(body).toContain(
+            'https://staging.example did not confirm that it was running this branch before the comparison, so the result above may not be of this change.',
+        );
         expect(body).not.toContain('confirming that');
     });
 });

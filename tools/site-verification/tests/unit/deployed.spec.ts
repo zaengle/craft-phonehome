@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
     decide,
+    fingerprintLock,
     lockMismatches,
     notDeployedAbort,
     readExpectedLock,
@@ -79,9 +80,20 @@ test.describe('lockMismatches', () => {
 });
 
 const COMMIT = 'dca2ad2f0c6b8e1a4b3c5d7e9f0a1b2c3d4e5f60';
+
+/** The same lock and fingerprint as tests/unit/RevisionResolverTest.php in the plugin. */
+const FIXTURE_LOCK = {
+    'content-hash': 'a1b2',
+    packages: [
+        { name: 'verbb/formie', version: '3.1.43', source: { reference: 'abc123' } },
+        { name: 'craftcms/cms', version: '5.11.1', dist: { reference: 'def456' } },
+    ],
+    'packages-dev': [{ name: 'craftcms/generator', version: '2.1.0' }],
+};
+const FIXTURE_FINGERPRINT = 'cf1210f2911d689f1bed30f33456f7710405cd69ed55eef06702a37ba9f56ade';
 const OTHER_COMMIT = '1111111111111111111111111111111111111111';
-const HASH = '3f2b6c0e8d1a4b5c9e7f60718293a4b5';
-const OTHER_HASH = '00000000000000000000000000000000';
+const HASH = '3f2b6c0e8d1a4b5c9e7f60718293a4b53f2b6c0e8d1a4b5c9e7f60718293a4b5';
+const OTHER_HASH = '0000000000000000000000000000000000000000000000000000000000000000';
 
 const expected: ExpectedRevision = { versions: lock, lockHash: HASH, commit: COMMIT };
 const matchingVersions = { 'craftcms/cms': '5.8.15', 'verbb/formie': '3.0.4' };
@@ -95,12 +107,33 @@ const report = (versions: Record<string, string>, revision: Partial<Omit<Reporte
 });
 
 test.describe('readExpectedLock and readReportedRevision', () => {
-    test('the expected side carries the lock file\'s content-hash and the commit it came from', () => {
+    test('the expected side fingerprints the locked packages and carries the commit it came from', () => {
         const path = join(mkdtempSync(join(tmpdir(), 'phv-lock-')), 'composer.lock');
-        writeFileSync(path, JSON.stringify({ 'content-hash': HASH.toUpperCase(), packages: [{ name: 'craftcms/cms', version: '5.8.15' }] }));
+        writeFileSync(path, JSON.stringify(FIXTURE_LOCK));
 
-        expect(readExpectedLock(path, COMMIT.toUpperCase())).toEqual({ versions: { 'craftcms/cms': '5.8.15' }, lockHash: HASH, commit: COMMIT });
+        expect(readExpectedLock(path, COMMIT.toUpperCase())).toEqual({
+            versions: { 'verbb/formie': '3.1.43', 'craftcms/cms': '5.11.1', 'craftcms/generator': '2.1.0' },
+            lockHash: FIXTURE_FINGERPRINT,
+            commit: COMMIT,
+        });
         expect(readExpectedLock(path, 'main').commit).toBeNull();
+    });
+
+    test('the fingerprint is the one the plugin computes, and is not Composer\'s content-hash', () => {
+        // tests/unit/RevisionResolverTest.php pins the same value for the same lock, so the runner
+        // and the plugin cannot drift apart without one of the two suites failing.
+        expect(fingerprintLock(FIXTURE_LOCK)).toBe(FIXTURE_FINGERPRINT);
+
+        // A security update moves a locked version and leaves composer.json, and so content-hash,
+        // alone. The fingerprint must move anyway.
+        const moved = structuredClone(FIXTURE_LOCK);
+        moved.packages[0].version = '3.1.44';
+        expect(moved['content-hash']).toBe(FIXTURE_LOCK['content-hash']);
+        expect(fingerprintLock(moved)).not.toBe(FIXTURE_FINGERPRINT);
+
+        const reordered = { ...FIXTURE_LOCK, packages: [...FIXTURE_LOCK.packages].reverse() };
+        expect(fingerprintLock(reordered)).toBe(FIXTURE_FINGERPRINT);
+        expect(fingerprintLock({ packages: [] })).toBeNull();
     });
 
     test('a report without a revision object, from an older plugin, has neither field', () => {

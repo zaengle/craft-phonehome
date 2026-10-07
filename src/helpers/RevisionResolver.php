@@ -9,8 +9,10 @@ use Throwable;
  * Works out what the environment is running, so a deployment can be confirmed by the environment
  * itself rather than by whoever deployed it.
  *
- * Two facts are reported. The lock hash is the `content-hash` Composer writes into composer.lock,
- * which fingerprints the dependency set and needs neither git nor a host's API. The commit is the
+ * Two facts are reported. The lock hash fingerprints the exact package versions composer.lock
+ * pins, and needs neither git nor a host's API. It is not Composer's own `content-hash`, which
+ * covers only composer.json and so does not change when an update moves locked versions without
+ * touching composer.json, which is exactly what a security remediation does. The commit is the
  * deployed commit's SHA, read from the first source in a fixed order that answers: an environment
  * variable or file the site names in its config, then `PHONE_HOME_REVISION`, then a `REVISION`
  * file at the project root (which Envoyer and Capistrano-style deploys write), then `.git/HEAD`
@@ -27,9 +29,12 @@ class RevisionResolver
     /** The file read at the project root when no earlier source answers. */
     public const DEFAULT_FILE = 'REVISION';
 
+    /** How much of `packed-refs` is searched before giving up on finding a branch in it. */
+    public const MAX_PACKED_REFS_BYTES = 5 * 1024 * 1024;
+
     /**
      * @param string $root The project root, where `REVISION` and `.git` are looked for.
-     * @param string $lockPath composer.lock, whose content-hash is reported.
+     * @param string $lockPath composer.lock, whose locked packages are fingerprinted.
      * @param string|null $configuredEnv An environment variable the site names, read first.
      * @param string|null $configuredFile A path relative to the root the site names, read second.
      * @param Closure(string): mixed $env Reads an environment variable, so tests need not set real ones.
@@ -88,12 +93,45 @@ class RevisionResolver
             }
 
             $lock = json_decode((string)file_get_contents($this->lockPath), true);
-            $hash = is_array($lock) ? ($lock['content-hash'] ?? null) : null;
 
-            return is_string($hash) && preg_match('/^[0-9a-f]{32}\z/i', $hash) === 1 ? strtolower($hash) : null;
+            return is_array($lock) ? self::fingerprintLock($lock) : null;
         } catch (Throwable) {
             return null;
         }
+    }
+
+    /**
+     * A SHA-256 of every locked package, as one `name version reference` line each, sorted.
+     *
+     * The deployment runner computes the same fingerprint from the lock file it expects
+     * (`fingerprintLock` in tools/site-verification/src/deployed.ts), so the two must stay in step.
+     * The reference is the source or dist commit, which is what moves when a `dev-` branch
+     * version is updated without its version string changing. Null when nothing is locked.
+     *
+     * @param array<mixed> $lock
+     */
+    public static function fingerprintLock(array $lock): ?string
+    {
+        $lines = [];
+
+        foreach (['packages', 'packages-dev'] as $key) {
+            foreach (is_array($lock[$key] ?? null) ? $lock[$key] : [] as $package) {
+                if (!is_array($package) || !is_string($package['name'] ?? null) || !is_string($package['version'] ?? null)) {
+                    continue;
+                }
+
+                $reference = $package['source']['reference'] ?? $package['dist']['reference'] ?? '';
+                $lines[] = $package['name'] . ' ' . $package['version'] . ' ' . (is_string($reference) ? $reference : '');
+            }
+        }
+
+        if ($lines === []) {
+            return null;
+        }
+
+        sort($lines, SORT_STRING);
+
+        return hash('sha256', implode("\n", $lines));
     }
 
     /**
@@ -179,17 +217,39 @@ class RevisionResolver
             return $loose;
         }
 
-        $packed = is_file($this->path('.git/packed-refs')) ? file($this->path('.git/packed-refs'), FILE_IGNORE_NEW_LINES) : false;
+        return $this->readPackedRef($ref);
+    }
 
-        foreach ($packed ?: [] as $line) {
-            $parts = explode(' ', trim($line), 2);
+    /**
+     * Finds one ref in `packed-refs`, line by line. A long-lived clone with many tags can have a
+     * packed-refs file of several megabytes, so it is streamed rather than loaded, and reading
+     * stops after a fixed amount rather than slowing the report.
+     */
+    protected function readPackedRef(string $ref): ?string
+    {
+        $path = $this->path('.git/packed-refs');
+        $handle = is_file($path) ? fopen($path, 'rb') : false;
 
-            if (count($parts) === 2 && $parts[1] === $ref) {
-                return $parts[0];
-            }
+        if ($handle === false) {
+            return null;
         }
 
-        return null;
+        try {
+            $read = 0;
+
+            while ($read < self::MAX_PACKED_REFS_BYTES && ($line = fgets($handle, 4096)) !== false) {
+                $read += strlen($line);
+                $parts = explode(' ', trim($line), 2);
+
+                if (count($parts) === 2 && $parts[1] === $ref) {
+                    return $parts[0];
+                }
+            }
+
+            return null;
+        } finally {
+            fclose($handle);
+        }
     }
 
     /** Reads a file under the root. A revision file holds one short line; anything large is not one. */

@@ -108,8 +108,8 @@
             "string",
             "null"
           ],
-          "pattern": "^[0-9a-f]{32}$",
-          "description": "The content-hash Composer wrote into composer.lock, which fingerprints the installed dependency set, or null if the lock file cannot be read"
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "A SHA-256 of every package composer.lock pins, one 'name version reference' line each, sorted and joined with newlines; null if the lock file cannot be read or locks nothing. Not Composer's content-hash, which covers only composer.json and does not change when an update moves locked versions"
         },
         "commit": {
           "type": [

@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { asCommit } from './deployed';
 
 /**
  * Run configuration, read once from the environment.
@@ -171,9 +172,9 @@ export function runConfig(): RunConfig {
         // same file in every worker.
         expectLock: process.env.PHV_EXPECT_LOCK?.trim() ? resolve(process.env.PHV_EXPECT_LOCK.trim()) : null,
         expectLockRef: process.env.PHV_EXPECT_LOCK_REF?.trim() || null,
-        // Anything that is not a 7-to-40 character hex SHA is treated as absent rather than as a
-        // commit nothing could ever match.
-        expectCommit: /^[0-9a-f]{7,40}$/i.test(process.env.PHV_EXPECT_COMMIT?.trim() ?? '') ? (process.env.PHV_EXPECT_COMMIT as string).trim().toLowerCase() : null,
+        // Anything that is not a SHA is treated as absent rather than as a commit nothing could
+        // ever match. One definition of a SHA, shared with the wait that compares against it.
+        expectCommit: asCommit(process.env.PHV_EXPECT_COMMIT),
         deployTimeoutMs: Math.max(0, Number(process.env.PHV_DEPLOY_TIMEOUT ?? 900)) * 1000,
         deployIntervalMs: Math.max(1, Number(process.env.PHV_DEPLOY_INTERVAL ?? 15)) * 1000,
         // Resolved here rather than at each use. Two callers each defaulting to Date.now() disagree
