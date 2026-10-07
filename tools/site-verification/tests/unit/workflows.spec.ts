@@ -195,3 +195,21 @@ test('caller input is passed through the environment instead of inserted into sh
         }
     }
 });
+
+test('the Playwright image matches the Playwright the runner installs', () => {
+    // The runner launches the browser the container image ships, so the image and package.json
+    // must name the same Playwright release. Dependabot bumps package.json alone; CI never
+    // launches a browser, so only this test notices when the image is left behind.
+    const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url).pathname, 'utf8')) as { devDependencies: Record<string, string> };
+    const version = pkg.devDependencies['@playwright/test'];
+    const compose = readFileSync(new URL('../../ddev/docker-compose.playwright.yaml', import.meta.url).pathname, 'utf8');
+
+    expect(version).toMatch(/^\d+\.\d+\.\d+$/);
+
+    for (const text of [verification, compose]) {
+        const images = [...text.matchAll(/mcr\.microsoft\.com\/playwright:v([\d.]+)-/g)].map((match) => match[1]);
+
+        expect(images.length).toBeGreaterThan(0);
+        expect(new Set(images)).toEqual(new Set([version]));
+    }
+});

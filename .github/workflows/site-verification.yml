@@ -152,7 +152,7 @@ jobs:
     # Note that a baseline captured on an Apple Silicon Mac is `linux-arm64` and will never match a
     # GitHub runner's `linux-x64`. CI captures its own baselines; local ones are for local work.
     container:
-      image: mcr.microsoft.com/playwright:v1.49.1-noble
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
 
     steps:
       - name: Check out the runner
