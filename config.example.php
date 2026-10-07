@@ -32,6 +32,12 @@ return [
 //    // disabled. Any invalid page invalidates the whole manifest rather than silently reducing
 //    // coverage, so a typo fails the run instead of shrinking it.
 //    'verification' => [
+//        // Where the report reads the deployed commit from, when the host records it somewhere the
+//        // default sources do not look. Both are optional. Without them the report tries
+//        // PHONE_HOME_REVISION, a REVISION file at the project root and then .git/HEAD. The file
+//        // path is relative to the project root and may not contain "..".
+//        'revisionEnv' => 'DEPLOYED_COMMIT',
+//        'revisionFile' => 'storage/release-sha',
 //        'pages' => [
 //            ['id' => 'home', 'path' => '/', 'assert' => ['visible' => '[data-testid="site-header"]']],
 //            ['id' => 'contact', 'path' => '/contact', 'assert' => ['visible' => '[data-testid="contact-form"]']],
