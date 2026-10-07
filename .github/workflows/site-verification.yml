@@ -129,6 +129,15 @@ on:
           capture. This is the evidence that a change reached the environment; a lock file moving
           on a branch is not.
         value: ${{ jobs.verify.outputs.environment }}
+      deploy_confirmed_by:
+        description: >-
+          For a compare that waited for a deploy: how the environment confirmed it was running the
+          commit before the after side was captured, as commit, lock_hash or versions. Empty when
+          the comparison did not wait, and for a capture.
+        value: ${{ jobs.verify.outputs.deploy_confirmed_by }}
+      deploy_confirmation:
+        description: 'The same, as a phrase naming the commit or lock file hash it matched, for a caller that quotes it.'
+        value: ${{ jobs.verify.outputs.deploy_confirmation }}
 
 # `id-token: write` is what lets a run prove its identity to Phone Home in place of a secret. The
 # calling workflow has to grant it too; without it the token step falls back to the secret.
@@ -143,6 +152,8 @@ jobs:
       overall: ${{ steps.summary.outputs.overall }}
       summary: ${{ steps.summary.outputs.summary }}
       environment: ${{ steps.summary.outputs.environment }}
+      deploy_confirmed_by: ${{ steps.summary.outputs.deploy_confirmed_by }}
+      deploy_confirmation: ${{ steps.summary.outputs.deploy_confirmation }}
 
     # Pinned to the same image the local DDEV service uses, and to the same Playwright version as
     # the runner's package.json. A baseline records the browser, the browser revision and the
@@ -170,6 +181,7 @@ jobs:
       # what the runner waits for the environment to report before it captures the after side, so
       # a comparison started by a push cannot run against the environment the push has not reached.
       - name: Check out the lock file the environment should be running
+        id: lock
         if: inputs.mode == 'compare'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -177,6 +189,22 @@ jobs:
           path: site
           sparse-checkout: ${{ inputs.lock_path }}
           sparse-checkout-cone-mode: false
+
+      # The commit that lock file came from. A plugin from 1.8.3 reports the commit it is running, and
+      # when it does, this is what the runner waits for it to report. Taken from the checkout's own
+      # output, or from the checkout itself; when neither yields one the runner waits for the lock
+      # file's hash instead, so a missing commit is never a failure.
+      - name: Name the commit the environment should be running
+        id: commit
+        if: inputs.mode == 'compare'
+        env:
+          CHECKED_OUT: ${{ steps.lock.outputs.commit }}
+        run: |
+          sha="$CHECKED_OUT"
+          if [ -z "$sha" ]; then
+            sha="$(git -C site rev-parse HEAD 2>/dev/null || true)"
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
       - name: Install the runner's dependencies
         working-directory: runner/tools/site-verification
@@ -212,6 +240,7 @@ jobs:
           # not the container's, inside a job that runs in a container.
           PHV_EXPECT_LOCK: ${{ inputs.mode == 'compare' && format('../../../site/{0}', inputs.lock_path) || '' }}
           PHV_EXPECT_LOCK_REF: ${{ inputs.lock_ref || github.sha }}
+          PHV_EXPECT_COMMIT: ${{ steps.commit.outputs.sha }}
           PHV_DEPLOY_TIMEOUT: ${{ inputs.deploy_timeout }}
           PHV_BASIC_AUTH_USER: ${{ secrets.basic_auth_user }}
           PHV_BASIC_AUTH_PASS: ${{ secrets.basic_auth_password }}

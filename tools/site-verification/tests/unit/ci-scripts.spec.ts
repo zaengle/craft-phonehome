@@ -88,7 +88,8 @@ test.describe('pr-body.sh', () => {
         const body = prBody(verified);
 
         expect(body).toContain('**Verification** — `changes_detected` against https://staging.example. 1 of 9 checks did not pass');
-        expect(body).toContain('Deployed to https://staging.example by https://github.com/z/x/actions/runs/9.');
+        expect(body).toContain('The deploy workflow finished (https://github.com/z/x/actions/runs/9).');
+        expect(body).not.toContain('Deployed to');
         expect(body).toContain('**Environment: craftcms/cms 5.8.14 → 5.8.15.**');
         expect(body).toContain('It did not exercise forms, the control panel, queue jobs, console commands');
         expect(body).not.toContain('[!WARNING]');
@@ -179,6 +180,32 @@ test.describe('pr-body.sh', () => {
         const body = prBody({ ...verified, MOVED: 'vendor/pkg "^2" -> 2.0.0' });
 
         expect(body).toContain('vendor/pkg "^2" -> 2.0.0');
+    });
+});
+
+test.describe('pr-body.sh on how the deploy was confirmed', () => {
+    test('the deploy workflow finishing and the environment confirming it are stated as two facts', () => {
+        const body = prBody({ ...verified, DEPLOY_CONFIRMED_BY: 'commit', DEPLOY_CONFIRMATION: 'the environment reported commit dca2ad2f0c6b' });
+
+        expect(body).toContain(
+            'The deploy workflow finished (https://github.com/z/x/actions/runs/9). Before the comparison, the environment reported commit dca2ad2f0c6b, confirming that https://staging.example was running this branch.',
+        );
+    });
+
+    test('the lock file hash and the versions are named the same way', () => {
+        expect(prBody({ ...verified, DEPLOY_CONFIRMED_BY: 'lock_hash', DEPLOY_CONFIRMATION: 'the environment reported lock file hash 3f2b' })).toContain(
+            'Before the comparison, the environment reported lock file hash 3f2b, confirming',
+        );
+        expect(
+            prBody({ ...verified, DEPLOY_CONFIRMED_BY: 'versions', DEPLOY_CONFIRMATION: 'the environment reported the Craft and plugin versions in the lock file' }),
+        ).toContain('Before the comparison, the environment reported the Craft and plugin versions in the lock file, confirming');
+    });
+
+    test('a comparison that recorded no confirmation does not claim one', () => {
+        const body = prBody({ ...verified, DEPLOY_CONFIRMED_BY: '', DEPLOY_CONFIRMATION: '' });
+
+        expect(body).toContain('The comparison did not record how https://staging.example confirmed it was running this branch.');
+        expect(body).not.toContain('confirming that');
     });
 });
 

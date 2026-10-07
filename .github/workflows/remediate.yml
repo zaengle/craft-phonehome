@@ -410,6 +410,8 @@ jobs:
           VERIFICATION: ${{ needs.verify.outputs.overall }}
           VERIFICATION_SUMMARY: ${{ needs.verify.outputs.summary }}
           ENVIRONMENT: ${{ needs.verify.outputs.environment }}
+          DEPLOY_CONFIRMED_BY: ${{ needs.verify.outputs.deploy_confirmed_by }}
+          DEPLOY_CONFIRMATION: ${{ needs.verify.outputs.deploy_confirmation }}
           BRANCH: ${{ inputs.branch }}
           BASE: ${{ github.ref_name }}
           TITLE: 'Security: ${{ inputs.package }} to ${{ inputs.version }}'
