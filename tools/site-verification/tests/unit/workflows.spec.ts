@@ -208,7 +208,7 @@ test('the example callers pin the shared workflows to one release tag, never a b
     const refs = examples.flatMap((text) => [...text.matchAll(/uses: zaengle\/craft-phonehome\/\.github\/workflows\/[a-z-]+\.yml@(\S+)/g)].map((match) => match[1]));
 
     expect(refs).toHaveLength(3);
-    expect(new Set(refs)).toEqual(new Set(['1.8.2']));
+    expect(new Set(refs)).toEqual(new Set(['1.8.3']));
 });
 
 test('every step that touches composer.json or composer.lock runs inside working_directory', () => {

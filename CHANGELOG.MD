@@ -1,5 +1,13 @@
 # Release Notes for Craft Phone Home Plugin
 
+## [1.8.3] - Unreleased
+
+This release changes how a remediation pull request and its commit name the Phone Home patch. The plugin itself and its API are unchanged, so the API schema stays at 1.5.0.
+
+- The pull request body names the patch as a link to its page in Phone Home instead of as `#90`. GitHub turned the bare number into a link to an unrelated issue or pull request with the same number in the site's repository.
+- The remediation commit says "Phone Home patch 90" for the same reason.
+- The example callers now reference the `1.8.3` tag.
+
 ## [1.8.2] - 2026-10-06
 
 This release changes how the shared remediation workflow updates Composer. The plugin itself and its API are unchanged, so the API schema stays at 1.5.0.
