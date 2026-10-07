@@ -52,7 +52,7 @@ require('fs').appendFileSync(process.env.CALLS, JSON.stringify(process.argv.slic
     expect(run.status, run.stderr).toBe(0);
     expect(existsSync(marker)).toBe(false);
     expect(readFileSync(calls, 'utf8').trim().split('\n').map((line) => JSON.parse(line))).toContainEqual([
-        'commit', '-m', `Security: craftcms/cms to ${version} (patch #1)`,
+        'commit', '-m', `Security: craftcms/cms to ${version} (Phone Home patch 1)`,
     ]);
 });
 
@@ -153,9 +153,26 @@ test.describe('pr-body.sh', () => {
     });
 
     test('an unreachable dashboard is said so rather than omitted', () => {
-        const body = prBody({ ...verified, CONTEXT: '' });
+        const body = prBody({ ...verified, CONTEXT: '', DASHBOARD_ORIGIN: 'https://ph.example/' });
 
-        expect(body).toContain('Phone Home could not be reached for the assessment behind patch #7');
+        expect(body).toContain('Phone Home could not be reached for the assessment behind [patch 7](https://ph.example/patches/7)');
+    });
+
+    test('the patch is a link to Phone Home, never a bare #number that GitHub links to an unrelated issue', () => {
+        // On zaengle/v4.1.zaengle.com#291 "patch #90" linked to that repository's own #90.
+        const context = JSON.stringify({ patch: { title: 'Formie 3.1.43', url: 'https://ph.example/patches/90' }, reviews: [] });
+        const answered = prBody({ ...verified, PATCH_ID: '90', CONTEXT: context, DASHBOARD_ORIGIN: 'https://elsewhere.example' });
+        const unreachable = prBody({ ...verified, PATCH_ID: '90', CONTEXT: '', DASHBOARD_ORIGIN: 'https://ph.example' });
+        const nowhere = prBody({ ...verified, PATCH_ID: '90', CONTEXT: '' });
+
+        // The page's own URL wins over one built from the origin.
+        expect(answered).toContain('Prepared by Phone Home for [patch 90](https://ph.example/patches/90).');
+        expect(unreachable).toContain('Prepared by Phone Home for [patch 90](https://ph.example/patches/90).');
+        expect(nowhere).toContain('Prepared by Phone Home for patch 90.');
+
+        for (const body of [answered, unreachable, nowhere]) {
+            expect(body).not.toMatch(/(^|[^\w&/])#\d+/m);
+        }
     });
 
     test('a command with quotes in what moved does not break the body', () => {

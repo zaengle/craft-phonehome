@@ -9,6 +9,8 @@
 # tolerated job failure reads as "success" to the workflow that tolerated it.
 #
 #   PATCH_ID               The Phone Home patch.
+#   DASHBOARD_ORIGIN       Where Phone Home is, so the patch can be linked when the context below
+#                          could not be fetched.
 #   ORIGIN                 The environment the change was verified against. Empty means the site
 #                          has none and the pull request was opened without verification.
 #   MOVED, COUNT           What Composer moved, one "name before -> after" per line, and how many.
@@ -27,9 +29,23 @@
 
 set -euo pipefail
 
-: "${PATCH_ID:=?}" "${ORIGIN:=}" "${MOVED:=}" "${COUNT:=0}" "${CONTEXT:=}" "${SCOPE:=}" "${SCOPE_REASON:=}"
+: "${PATCH_ID:=?}" "${DASHBOARD_ORIGIN:=}" "${ORIGIN:=}" "${MOVED:=}" "${COUNT:=0}" "${CONTEXT:=}" "${SCOPE:=}" "${SCOPE_REASON:=}"
 : "${BASELINE:=}" "${BASELINE_SUMMARY:=}" "${DEPLOYED:=}" "${DEPLOY_JOB:=}" "${DEPLOY_RUN_URL:=}"
 : "${VERIFY_JOB:=}" "${VERIFICATION:=}" "${VERIFICATION_SUMMARY:=}" "${ENVIRONMENT:=}"
+
+# The patch is named as a link to its page in Phone Home, never as `#<number>`. GitHub turns a bare
+# `#90` into a link to issue or pull request 90 of whichever repository the body lands in, which
+# has nothing to do with Phone Home's patch 90. The context carries the page's own URL; without it
+# the URL is built from the dashboard's origin, and without that the number is written plainly.
+patch_url="$(printf '%s' "$CONTEXT" | jq -r '.patch.url // empty' 2>/dev/null || true)"
+if [ -z "$patch_url" ] && [ -n "$DASHBOARD_ORIGIN" ]; then
+    patch_url="${DASHBOARD_ORIGIN%/}/patches/${PATCH_ID}"
+fi
+if [ -n "$patch_url" ]; then
+    patch_ref="[patch ${PATCH_ID}](${patch_url})"
+else
+    patch_ref="patch ${PATCH_ID}"
+fi
 
 # The judgement behind the change. The person merging should see why it exists and who already
 # agreed, not re-derive both from a lock file diff. A dashboard that could not be reached is said
@@ -47,7 +63,7 @@ if [ -n "$CONTEXT" ] && printf '%s' "$CONTEXT" | jq -e '.patch' >/dev/null 2>&1;
             + "; dispatched by " + (.dispatched_by // "nobody recorded") + "."
     ')"
 else
-    why="**Why** — Phone Home could not be reached for the assessment behind patch #${PATCH_ID}; it is on the patch page there."
+    why="**Why** — Phone Home could not be reached for the assessment behind ${patch_ref}; it is on the patch page there."
 fi
 
 # A security patch that moves three packages and one that moves fifty are different things to
@@ -96,7 +112,7 @@ else
 > ${ORIGIN} was not deployed with this branch, so the comparison above measured the environment as it already was. It says nothing about this change."
 fi
 
-echo "Prepared by Phone Home for patch #${PATCH_ID}."
+echo "Prepared by Phone Home for ${patch_ref}."
 echo
 echo "$why"
 echo

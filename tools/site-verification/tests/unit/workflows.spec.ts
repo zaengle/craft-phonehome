@@ -260,3 +260,8 @@ test('how far the Composer update reached is carried into the pull request body'
     expect(job('pull_request')).toContain('SCOPE: ${{ needs.prepare.outputs.scope }}');
     expect(job('pull_request')).toContain('SCOPE_REASON: ${{ needs.prepare.outputs.scope_reason }}');
 });
+
+test('the pull request step can link the patch even when Phone Home could not be reached', () => {
+    expect(job('pull_request')).toContain('DASHBOARD_ORIGIN: ${{ inputs.dashboard_origin }}');
+    expect(remediate).not.toMatch(/patch #\$/);
+});

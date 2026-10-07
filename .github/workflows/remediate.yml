@@ -258,7 +258,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add composer.lock composer.json
-          git commit -m "Security: $PACKAGE to $VERSION (patch #$PATCH_ID)"
+          # "patch 90", not "patch #90": GitHub links a bare #90 in a commit message to this
+          # repository's own issue or pull request 90, which is not Phone Home's patch.
+          git commit -m "Security: $PACKAGE to $VERSION (Phone Home patch $PATCH_ID)"
           git push --set-upstream origin "$BRANCH"
 
   # Waits for the baseline as well as the branch: the environment must be frozen before the branch
@@ -392,6 +394,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PATCH_ID: ${{ inputs.patch_id }}
+          DASHBOARD_ORIGIN: ${{ inputs.dashboard_origin }}
           ORIGIN: ${{ inputs.verify_origin }}
           CONTEXT: ${{ steps.context.outputs.json }}
           MOVED: ${{ needs.prepare.outputs.moved }}
