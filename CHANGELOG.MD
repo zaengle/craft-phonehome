@@ -2,10 +2,18 @@
 
 ## [1.8.3] - Unreleased
 
-This release changes how a remediation pull request and its commit name the Phone Home patch. The plugin itself and its API are unchanged, so the API schema stays at 1.5.0.
+This release lets the environment say exactly what it is running, so a deployment is confirmed by the site itself rather than by whoever deployed it. The API schema moves to 1.6.0. The change is additive, so nothing existing is removed or renamed.
 
-- The pull request body names the patch as a link to its page in Phone Home instead of as `#90`. GitHub turned the bare number into a link to an unrelated issue or pull request with the same number in the site's repository.
-- The remediation commit says "Phone Home patch 90" for the same reason.
+- The report has a new `revision` object.
+  - `lock_hash` is the `content-hash` of the site's composer.lock.
+  - `commit` is the deployed commit's SHA, read from the first source that holds one: an environment variable or file the site names, the `PHONE_HOME_REVISION` environment variable, a `REVISION` file at the project root (which Envoyer and Capistrano-style deploys write), and then `.git/HEAD` when the release is a git clone (which Forge produces). Git is read as files and never run.
+  - `commit_source` says which source answered.
+
+  Every field is null when it cannot be established, and reading it never fails the report.
+- A site can name its own source with `revisionEnv` (an environment variable name) or `revisionFile` (a path relative to the project root) in its `verification` config. A malformed value makes the manifest invalid with an error naming the setting.
+- Before a comparison captures the after side, the runner now waits for the environment to report the commit it was given. When the environment reports no commit, it waits for the lock file's hash. A reported commit that differs keeps the runner waiting, whatever the package versions say. A site on a plugin older than 1.8.3 reports neither, and keeps the version-based wait.
+- The remediation pull request no longer presents the deploy workflow finishing as proof of the deploy. It says that the workflow finished, and how the environment confirmed the change before the comparison: by its commit, its lock file hash or its package versions. The deploy contract in the examples now says the same. A deploy workflow must still fail when it knows the deploy failed, but a hook that answers when the deploy is queued makes the comparison slower, not wrong.
+- The pull request body names the Phone Home patch as a link to its page instead of as `#90`. GitHub turned the bare number into a link to an unrelated issue or pull request with the same number in the site's repository. The remediation commit says "Phone Home patch 90" for the same reason.
 - The example callers now reference the `1.8.3` tag.
 
 ## [1.8.2] - 2026-10-06
