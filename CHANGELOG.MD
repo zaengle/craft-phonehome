@@ -1,6 +1,6 @@
 # Release Notes for Craft Phone Home Plugin
 
-## [1.8.3] - Unreleased
+## [1.8.3] - 2026-10-07
 
 This release lets the environment say exactly what it is running, so a deployment is confirmed by the site itself rather than by whoever deployed it. The API schema moves to 1.6.0. The change is additive, so nothing existing is removed or renamed.
 
