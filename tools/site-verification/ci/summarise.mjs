@@ -8,7 +8,8 @@
  *
  *   node ci/summarise.mjs runs/<host>/<run>/result.json
  *
- * Writes the summary to $GITHUB_STEP_SUMMARY and `overall`, `summary` and `environment` to
+ * Writes the summary to $GITHUB_STEP_SUMMARY and `overall`, `summary`, `environment`,
+ * `deploy_confirmed_by` and `deploy_confirmation` to
  * $GITHUB_OUTPUT when those are set, and prints the summary to stdout either way.
  */
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
@@ -36,8 +37,33 @@ export function describeEnvironment(delta) {
 }
 
 /**
+ * How the environment confirmed the deploy before the comparison, as a phrase, or '' when it did not
+ * wait for one.
+ *
+ * @param {unknown} confirmation
+ */
+export function describeDeployConfirmation(confirmation) {
+    if (!confirmation || typeof confirmation !== 'object') {
+        return '';
+    }
+
+    const { confirmed_by: by, value } = /** @type {{ confirmed_by?: string; value?: string | null }} */ (confirmation);
+
+    switch (by) {
+        case 'commit':
+            return `the environment reported commit ${value}`;
+        case 'lock_hash':
+            return `the environment reported lock file hash ${value}`;
+        case 'versions':
+            return 'the environment reported the Craft and plugin versions in the lock file';
+        default:
+            return '';
+    }
+}
+
+/**
  * @param {Record<string, any>} report
- * @return {{ overall: string; summary: string; environment: string; markdown: string }}
+ * @return {{ overall: string; summary: string; environment: string; deployConfirmedBy: string; deployConfirmation: string; markdown: string }}
  */
 export function summarise(report, unstoredBaseline = null) {
     const checks = Array.isArray(report.checks) ? report.checks : [];
@@ -46,6 +72,8 @@ export function summarise(report, unstoredBaseline = null) {
     // found, so it is published as inconclusive and the reason leads the summary.
     const overall = unstoredBaseline !== null ? 'inconclusive' : typeof report.overall === 'string' ? report.overall : '';
     const environment = describeEnvironment(report.environment_delta);
+    const deployConfirmation = describeDeployConfirmation(report.deploy_confirmation);
+    const deployConfirmedBy = deployConfirmation === '' ? '' : String(report.deploy_confirmation.confirmed_by);
 
     const named = failing
         .slice(0, 6)
@@ -86,11 +114,15 @@ export function summarise(report, unstoredBaseline = null) {
         lines.push(`**${environment}**`, '');
     }
 
+    if (deployConfirmation !== '') {
+        lines.push(`Before comparing, ${deployConfirmation}.`, '');
+    }
+
     const rows = failing.map((check) => `| ${check.id} | ${check.kind} | ${check.outcome} | ${String(check.diagnostic ?? '').slice(0, 160)} |`);
 
     lines.push(rows.length > 0 ? ['| Page | Check | Outcome | Diagnostic |', '|---|---|---|---|', ...rows].join('\n') : 'Every check passed.');
 
-    return { overall, summary, environment, markdown: `${lines.join('\n')}\n` };
+    return { overall, summary, environment, deployConfirmedBy, deployConfirmation, markdown: `${lines.join('\n')}\n` };
 }
 
 /** Everything a workflow output must not contain, folded to a space. */
@@ -106,7 +138,7 @@ function main() {
 
         process.stdout.write(markdown);
         if (stepSummary) appendFileSync(stepSummary, markdown);
-        if (outputs) appendFileSync(outputs, 'overall=\nsummary=The run produced no result, so nothing was verified.\nenvironment=\n');
+        if (outputs) appendFileSync(outputs, 'overall=\nsummary=The run produced no result, so nothing was verified.\nenvironment=\ndeploy_confirmed_by=\ndeploy_confirmation=\n');
 
         return;
     }
@@ -117,7 +149,13 @@ function main() {
 
     process.stdout.write(result.markdown);
     if (stepSummary) appendFileSync(stepSummary, result.markdown);
-    if (outputs) appendFileSync(outputs, `overall=${oneLine(result.overall)}\nsummary=${oneLine(result.summary)}\nenvironment=${oneLine(result.environment)}\n`);
+    if (outputs) {
+        appendFileSync(
+            outputs,
+            `overall=${oneLine(result.overall)}\nsummary=${oneLine(result.summary)}\nenvironment=${oneLine(result.environment)}\n` +
+                `deploy_confirmed_by=${oneLine(result.deployConfirmedBy)}\ndeploy_confirmation=${oneLine(result.deployConfirmation)}\n`,
+        );
+    }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === new URL(import.meta.url).pathname) {

@@ -88,7 +88,8 @@ test.describe('pr-body.sh', () => {
         const body = prBody(verified);
 
         expect(body).toContain('**Verification** — `changes_detected` against https://staging.example. 1 of 9 checks did not pass');
-        expect(body).toContain('Deployed to https://staging.example by https://github.com/z/x/actions/runs/9.');
+        expect(body).toContain('The deploy workflow finished (https://github.com/z/x/actions/runs/9).');
+        expect(body).not.toContain('Deployed to');
         expect(body).toContain('**Environment: craftcms/cms 5.8.14 → 5.8.15.**');
         expect(body).toContain('It did not exercise forms, the control panel, queue jobs, console commands');
         expect(body).not.toContain('[!WARNING]');
@@ -179,6 +180,36 @@ test.describe('pr-body.sh', () => {
         const body = prBody({ ...verified, MOVED: 'vendor/pkg "^2" -> 2.0.0' });
 
         expect(body).toContain('vendor/pkg "^2" -> 2.0.0');
+    });
+});
+
+test.describe('pr-body.sh on how the deploy was confirmed', () => {
+    test('the deploy workflow finishing and the environment confirming it are stated as two facts', () => {
+        const body = prBody({ ...verified, DEPLOY_CONFIRMED_BY: 'commit', DEPLOY_CONFIRMATION: 'the environment reported commit dca2ad2f0c6b' });
+
+        expect(body).toContain(
+            'The deploy workflow finished (https://github.com/z/x/actions/runs/9). Before the comparison, the environment reported commit dca2ad2f0c6b, confirming that https://staging.example was running this branch.',
+        );
+    });
+
+    test('the lock file hash and the versions are named the same way', () => {
+        expect(prBody({ ...verified, DEPLOY_CONFIRMED_BY: 'lock_hash', DEPLOY_CONFIRMATION: 'the environment reported lock file hash 3f2b' })).toContain(
+            'Before the comparison, the environment reported lock file hash 3f2b, confirming',
+        );
+        expect(
+            prBody({ ...verified, DEPLOY_CONFIRMED_BY: 'versions', DEPLOY_CONFIRMATION: 'the environment reported the Craft and plugin versions in the lock file' }),
+        ).toContain('Before the comparison, the environment reported the Craft and plugin versions in the lock file, confirming');
+    });
+
+    test('a comparison whose wait was never confirmed says so, rather than implying it was', () => {
+        // The case the review found: the deploy workflow finished, the wait timed out, and the old
+        // wording read as though staging had confirmed the branch in some unrecorded way.
+        const body = prBody({ ...verified, VERIFICATION: 'inconclusive', DEPLOY_CONFIRMED_BY: '', DEPLOY_CONFIRMATION: '' });
+
+        expect(body).toContain(
+            'https://staging.example did not confirm that it was running this branch before the comparison, so the result above may not be of this change.',
+        );
+        expect(body).not.toContain('confirming that');
     });
 });
 
@@ -453,6 +484,22 @@ test.describe('summarise.mjs', () => {
         expect(stdout).toContain('Use "Re-run all jobs" so the baseline is captured again.');
     });
 
+    test('how the environment confirmed the deploy is published and stated', () => {
+        const commit = summarise({ overall: 'passed', checks: [], deploy_confirmation: { confirmed_by: 'commit', value: 'dca2ad2f0c6b' } });
+
+        expect(commit.outputs).toContain('deploy_confirmed_by=commit\ndeploy_confirmation=the environment reported commit dca2ad2f0c6b\n');
+        expect(commit.stdout).toContain('Before comparing, the environment reported commit dca2ad2f0c6b.');
+
+        expect(summarise({ overall: 'passed', checks: [], deploy_confirmation: { confirmed_by: 'lock_hash', value: '3f2b' } }).outputs).toContain(
+            'deploy_confirmation=the environment reported lock file hash 3f2b\n',
+        );
+        expect(summarise({ overall: 'passed', checks: [], deploy_confirmation: { confirmed_by: 'versions', value: null } }).outputs).toContain(
+            'deploy_confirmation=the environment reported the Craft and plugin versions in the lock file\n',
+        );
+        // A capture, or a comparison that did not wait, says nothing about a deploy.
+        expect(summarise({ overall: 'passed', checks: [] }).outputs).toContain('deploy_confirmed_by=\ndeploy_confirmation=\n');
+    });
+
     test('a capture has no environment line', () => {
         expect(summarise({ overall: 'passed', checks: [] }).outputs).toContain('environment=\n');
     });
@@ -465,6 +512,7 @@ test.describe('summarise.mjs', () => {
 
         expect(run.status).toBe(0);
         expect(readFileSync(outputs, 'utf8')).toContain('overall=\nsummary=The run produced no result, so nothing was verified.\n');
+        expect(readFileSync(outputs, 'utf8')).toContain('deploy_confirmed_by=\n');
     });
 
     test('a newline in a diagnostic cannot break a workflow output', () => {

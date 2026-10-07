@@ -10,6 +10,7 @@ use DateTime;
 use Throwable;
 use yii\base\Component;
 use yii\db\Expression;
+use zaengle\phonehome\helpers\RevisionResolver;
 use zaengle\phonehome\PhoneHome;
 
 /**
@@ -107,6 +108,16 @@ class Verification extends Component
             }
         }
 
+        // Where the report reads the deployed commit from, when the site's host records it
+        // somewhere the default sources do not look. Read by the Report service, not here.
+        if (array_key_exists('revisionEnv', $raw) && (!is_string($raw['revisionEnv']) || !RevisionResolver::isValidEnvName($raw['revisionEnv']))) {
+            $errors[] = 'verification.revisionEnv must be the name of an environment variable.';
+        }
+
+        if (array_key_exists('revisionFile', $raw) && (!is_string($raw['revisionFile']) || !RevisionResolver::isSafeRelativePath($raw['revisionFile']))) {
+            $errors[] = 'verification.revisionFile must be a path relative to the project root, without "..".';
+        }
+
         $auto = ($raw['autoCoverTemplates'] ?? null) === true;
 
         if ($auto && array_key_exists('pages', $raw) && (!is_array($raw['pages']) || !array_is_list($raw['pages']))) {
@@ -122,7 +133,7 @@ class Verification extends Component
 
         // Removed before validation so the page contract stays exactly what it was. A mistyped key
         // such as `autoCoverTemplate` therefore still fails loudly as an unknown key.
-        unset($raw['autoCoverTemplates'], $raw['defaultAssert'], $raw['masks']);
+        unset($raw['autoCoverTemplates'], $raw['defaultAssert'], $raw['masks'], $raw['revisionEnv'], $raw['revisionFile']);
 
         if ($auto) {
             $raw['pages'] = $this->withAutoCoverage($raw['pages'] ?? [], $defaultAssert, $masks);

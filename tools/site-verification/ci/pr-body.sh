@@ -22,6 +22,9 @@
 #   DEPLOYED               1 when the site's deploy workflow succeeded, otherwise anything else.
 #   DEPLOY_JOB             The deploy job's status, to tell "failed" from "never named".
 #   DEPLOY_RUN_URL         The deploy run, when one started.
+#   DEPLOY_CONFIRMED_BY    How the environment confirmed it was running this branch before the
+#                          comparison: commit, lock_hash or versions. Empty when it did not.
+#   DEPLOY_CONFIRMATION    The same as a phrase naming what it matched.
 #   VERIFY_JOB             The compare job's status, to tell "skipped" from "produced nothing".
 #   VERIFICATION           The compare's outcome as the runner reported it.
 #   VERIFICATION_SUMMARY   One line on what the compare found.
@@ -32,6 +35,7 @@ set -euo pipefail
 : "${PATCH_ID:=?}" "${DASHBOARD_ORIGIN:=}" "${ORIGIN:=}" "${MOVED:=}" "${COUNT:=0}" "${CONTEXT:=}" "${SCOPE:=}" "${SCOPE_REASON:=}"
 : "${BASELINE:=}" "${BASELINE_SUMMARY:=}" "${DEPLOYED:=}" "${DEPLOY_JOB:=}" "${DEPLOY_RUN_URL:=}"
 : "${VERIFY_JOB:=}" "${VERIFICATION:=}" "${VERIFICATION_SUMMARY:=}" "${ENVIRONMENT:=}"
+: "${DEPLOY_CONFIRMED_BY:=}" "${DEPLOY_CONFIRMATION:=}"
 
 # The patch is named as a link to its page in Phone Home, never as `#<number>`. GitHub turns a bare
 # `#90` into a link to issue or pull request 90 of whichever repository the body lands in, which
@@ -103,7 +107,17 @@ fi
 if [ -z "$ORIGIN" ]; then
     deployed=""
 elif [ "$DEPLOYED" = "1" ]; then
-    deployed="Deployed to ${ORIGIN} by ${DEPLOY_RUN_URL}."
+    # Two facts, kept apart. The deploy workflow finishing says the deploy was started and did not
+    # report a failure; it is not proof the environment is running this branch. The environment's
+    # own report is, and the comparison waited for it.
+    deployed="The deploy workflow finished${DEPLOY_RUN_URL:+ (${DEPLOY_RUN_URL})}."
+    if [ -n "$DEPLOY_CONFIRMATION" ]; then
+        deployed="${deployed} Before the comparison, ${DEPLOY_CONFIRMATION}, confirming that ${ORIGIN} was running this branch."
+    elif [ -n "$VERIFICATION" ]; then
+        # No confirmation means the environment never reported this branch before the wait gave up,
+        # or the runner predates the wait. Either way nothing confirmed it, and that is what is said.
+        deployed="${deployed} ${ORIGIN} did not confirm that it was running this branch before the comparison, so the result above may not be of this change."
+    fi
 elif [ "$DEPLOY_JOB" = "failure" ]; then
     deployed="> [!WARNING]
 > The deploy to ${ORIGIN} failed${DEPLOY_RUN_URL:+ (${DEPLOY_RUN_URL})}, so nothing was compared. This change has not been rendered anywhere."

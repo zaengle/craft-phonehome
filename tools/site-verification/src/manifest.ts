@@ -50,6 +50,7 @@ export function bundlePaths(bundleDir: string) {
         drift: join(bundleDir, 'drift.json'),
         change: join(bundleDir, 'change.json'),
         environment: join(bundleDir, 'environment.json'),
+        deploy: join(bundleDir, 'deploy.json'),
         capture: join(bundleDir, 'capture.json'),
         pendingCapture: join(bundleDir, 'capture.pending.json'),
         attempts: join(bundleDir, 'attempts'),

@@ -74,6 +74,7 @@ told which baseline it is comparing against. Generating one would compare a run 
 | `PHV_API_ORIGIN` | Plugin API origin, when it differs from the site origin |
 | `PHV_INSECURE_TLS` | Accepts a self-signed certificate, for one request, for local work only |
 | `PHV_EXPECT_LOCK` | For `compare`: a `composer.lock` the environment must report before the after side is captured |
+| `PHV_EXPECT_COMMIT` | For `compare`: the commit `PHV_EXPECT_LOCK` came from, which decides the wait when the environment reports its commit |
 | `PHV_DEPLOY_TIMEOUT` | Seconds to wait for the environment to report `PHV_EXPECT_LOCK`, 900 by default |
 
 ## Running it in CI
@@ -88,7 +89,9 @@ around its existing deploy; see `examples/verify-on-deploy.yml` for the whole fi
 A comparison waits for the environment rather than for whatever started it. The workflow checks out
 the `composer.lock` of the commit the comparison is about (`lock_ref`, which defaults to the commit
 that started the calling workflow) and the runner polls the plugin's report until the environment
-reports the Craft and plugin versions it records. When `deploy_timeout` passes first, the outcome
+reports that commit, or that lock file's hash when it cannot find its commit, or, from a plugin
+older than 1.8.3, the Craft and plugin versions the lock file records. Which of the three confirmed
+it is recorded in the result as `deploy_confirmation` and published as `deploy_confirmed_by`. When `deploy_timeout` passes first, the outcome
 is `inconclusive` with a reason naming the versions it was waiting for, never `passed`. A host that
 deploys on its own after a push is the case this exists for: without it the comparison measured the
 environment before the deploy reached it.
@@ -107,9 +110,14 @@ Home has not linked passes a `phonehome_token` secret instead, and that always w
 
 A site that opts in to remediation copies `examples/remediate.yml`, the thin workflow Phone Home
 dispatches. A site that can deploy also copies `examples/deploy-staging.yml`, the deploy contract:
-the site's own deploy behind a `workflow_dispatch` trigger, whose one obligation is to not exit
-until the ref it was started on is live on the verification environment, failing if it is not.
-The remediation workflow starts it, waits on it, and only compares when it succeeded. A site that
+the site's own deploy behind a `workflow_dispatch` trigger, which deploys the ref it was started on
+and fails when it knows the deploy failed. The remediation workflow starts it, waits on it, and
+does not compare when it failed. Its finishing is not the proof that the environment is running
+the ref; the environment's own report is. The plugin reports the commit it is running, or its
+lock file's hash, and the comparison waits for that, up to `deploy_timeout`, before capturing
+anything. A deploy hook that answers as soon as a deploy is queued therefore makes the comparison
+slower, not wrong, though waiting for the deploy to finish where the host can report it keeps the
+comparison prompt. A site that
 names no deploy workflow is dispatched with no environment at all; the branch is pushed and the
 pull request opened, marked as not verified, and that is the whole of what it gets.
 

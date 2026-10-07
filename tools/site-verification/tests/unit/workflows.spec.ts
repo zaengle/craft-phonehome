@@ -265,3 +265,18 @@ test('the pull request step can link the patch even when Phone Home could not be
     expect(job('pull_request')).toContain('DASHBOARD_ORIGIN: ${{ inputs.dashboard_origin }}');
     expect(remediate).not.toMatch(/patch #\$/);
 });
+
+test('the comparison is told the commit it waits for, and says how the deploy was confirmed', () => {
+    expect(verification).toContain('PHV_EXPECT_COMMIT: ${{ steps.commit.outputs.sha }}');
+    expect(verification).toContain('CHECKED_OUT: ${{ steps.lock.outputs.commit }}');
+
+    for (const output of ['deploy_confirmed_by', 'deploy_confirmation']) {
+        expect(verification).toContain(`value: \${{ jobs.verify.outputs.${output} }}`);
+        expect(verification).toContain(`${output}: \${{ steps.summary.outputs.${output} }}`);
+    }
+
+    expect(job('pull_request')).toContain('DEPLOY_CONFIRMED_BY: ${{ needs.verify.outputs.deploy_confirmed_by }}');
+    expect(job('pull_request')).toContain('DEPLOY_CONFIRMATION: ${{ needs.verify.outputs.deploy_confirmation }}');
+    // A deploy workflow that failed is still a failed deploy, whatever the environment reports.
+    expect(job('verify')).toContain("needs.deploy.result == 'success'");
+});
