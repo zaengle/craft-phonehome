@@ -1,5 +1,15 @@
 # Release Notes for Craft Phone Home Plugin
 
+## Unreleased
+
+This release changes what a remediation commits. The plugin itself and its API are unchanged, so the API schema stays at 1.6.0.
+
+- A remediation now keeps project config in step with the schema versions it installs. When an update raises a Craft plugin's schema version, or Craft's, the remediation rewrites the matching `schemaVersion` in the site's project config and commits it with the lock file, and the pull request lists each change. Before this, such an update migrated the database on deploy and then stopped at Craft's project config check, and every later deploy failed until the YAML was edited by hand. When the update brings a new migration that writes project config, which a version number cannot capture, the pull request still opens but leads with a warning to apply the update locally before merging.
+- The `verify-on-deploy.yml` example now mints `<commit SHA>-<GitHub run id>-<attempt>` as the run id, and recommends `<deployment SHA>-deploy-<deployment id>` for the `deployment_status` shape. A run id must begin with the deployed commit's SHA, or Phone Home records the comparison but never links it to a patch.
+- The remediation's branch name, pull request title and commit message are now documented as a contract that sites may rely on, and are pinned by tests. Their formats are unchanged.
+- The site verification runner moves to Playwright 1.63.0, in the matching `mcr.microsoft.com/playwright:v1.63.0-noble` image, and a test now fails if the image and the runner name different Playwright releases.
+- The API documentation now says that a request with no token is answered with 404 outside dev mode and 401 in dev mode, and that a wrong token is answered with 401.
+
 ## [1.8.3] - 2026-10-07
 
 This release lets the environment say exactly what it is running, so a deployment is confirmed by the site itself rather than by whoever deployed it. The API schema moves to 1.6.0. The change is additive, so nothing existing is removed or renamed.

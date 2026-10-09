@@ -136,7 +136,10 @@ Three things decide whether a pair is comparable, and all three are enforced rat
   local bundle can never be used against staging even by accident.
 - **The run id.** Both halves must share one, and it must be new. Re-capturing over a sealed
   baseline is refused, because otherwise a comparison that found a regression could be made to pass
-  by running capture again.
+  by running capture again. A site's own pair should use `<commit SHA>-<GitHub run id>-<attempt>`.
+  It must begin with the full SHA of the deployed commit, because Phone Home links a comparison to
+  a security remediation by reading that SHA from the start of the run id; an id that does not begin
+  with it is recorded but never linked to a patch.
 
 Note that **CI captures its own baselines**. A baseline taken on an Apple Silicon Mac records
 `linux-arm64` and will never match a GitHub runner's `linux-x64`; the origins differ too. Local
@@ -146,6 +149,34 @@ If the environment sits behind HTTP basic auth — staging commonly does — set
 and `PHV_BASIC_AUTH_PASS`. These credentials cover the browser and the plugin API when it is on the
 same origin. A separate `PHV_API_ORIGIN` receives only the Phone Home token. Without credentials a
 protected API makes the run inconclusive, and protected pages cannot be verified.
+
+## What a remediation leaves behind
+
+Sites may rely on three strings the shared `remediate.yml` produces, to recognise a remediation
+merge after it lands and to read the patch, package and version from it:
+
+- **The branch**, named by Phone Home: `security/patch-<patch>-site-<site>`.
+- **The pull request title**: `Security: <package> to <version>`.
+- **The commit message**: `Security: <package> to <version> (Phone Home patch <patch>)`. It
+  survives merge, rebase and squash merges whose body carries the commit messages.
+
+A site's `verify-on-deploy.yml` can, for example, read the pushed commit's pull request branch to
+decide that a push is a remediation, and pass the package and version to the comparison as
+`expect_package` and `expect_version`. Changing any of these three strings would quietly turn that
+off for every such site, so a change to them is a breaking change and is called out in the
+changelog. Their formats are pinned by tests.
+
+## Project config and schema versions
+
+A remediation keeps project config in step with the schema versions it installs: it rewrites
+each moved plugin's `schemaVersion`, and Craft's, in `config/project/` and commits it with the
+lock. It cannot reproduce a migration that writes project config, so when an update brings a new
+one, the pull request leads with a warning to apply it locally, the branch is not deployed or
+compared, and the workflow tries to add the `phone-home: apply locally` label. Create that label
+in the site's repository once; the job's token can add an existing label but not create one. The
+check for such migrations reads their source, so it is a heuristic: it catches `set` and `remove`
+on the project config service and the Craft methods that save project config, and it ignores
+migrations that only read it.
 
 ## Outcomes
 

@@ -2,8 +2,15 @@
 # existing deploy between the two halves.
 #
 # The shape is: freeze a baseline, deploy, compare against the frozen copy. Both halves must share
-# a run id, and it must be one this site has not used before — the commit SHA plus the run attempt
-# does both jobs, and a re-run of the pair gets a fresh identity rather than a refused baseline.
+# a run id, and it must be one this site has not used before.
+#
+# The run id is the deployed commit's full SHA, then GitHub's run id, then the run attempt. It has to
+# begin with the full SHA, because Phone Home links a comparison to a security remediation by reading
+# the commit from the start of the run id and matching it to the remediation's merge commit. An id
+# that does not begin with the SHA is recorded but never linked to a patch, and nothing fails to say
+# so. The GitHub run id after it keeps a push and a run started by hand on the same commit apart,
+# which the SHA and attempt alone do not, and the attempt gives a re-run of the pair a fresh
+# identity rather than a refused baseline.
 #
 # What this needs before it will run:
 #
@@ -36,7 +43,9 @@
 #     captured before the deploy starts, and the comparison follows it.
 #   * Or, where the host records GitHub deployments, trigger on `deployment_status` instead of
 #     `push`, capturing when the deployment reports `in_progress` and comparing when it reports
-#     `success`, with `deploy-${{ github.event.deployment.id }}` as the shared run id. The two
+#     `success`, with `${{ github.event.deployment.sha }}-deploy-${{ github.event.deployment.id }}`
+#     as the shared run id: both halves can compute it, it is unique per deployment, and it begins
+#     with the deployed commit, so Phone Home can link it. The two
 #     halves are then separate runs, held apart by the concurrency group below. `github.sha` is the
 #     deployment's commit on that event, so the comparison waits for the right lock file without
 #     being told; a caller started any other way passes the deployed commit as `lock_ref`.
@@ -71,9 +80,9 @@ jobs:
   pair:
     runs-on: ubuntu-latest
     outputs:
-      run_id: ${{ github.sha }}-${{ github.run_attempt }}
+      run_id: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
-      - run: echo "run id ${{ github.sha }}-${{ github.run_attempt }}"
+      - run: echo "run id ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}"
 
   baseline:
     needs: pair
