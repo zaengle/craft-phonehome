@@ -50,8 +50,23 @@ class RevisionResolverTest extends TestCase
      */
     private function resolve(?string $configuredEnv = null, ?string $configuredFile = null): array
     {
+        return $this->resolveAt($this->root, $configuredEnv, $configuredFile);
+    }
+
+    /**
+     * Resolves with a Craft root somewhere below the test directory, for the layouts that keep the
+     * application in a subdirectory and `.git` above it.
+     *
+     * @return array{lock_hash: string|null, commit: string|null, commit_source: string|null}
+     */
+    private function resolveAt(string $root, ?string $configuredEnv = null, ?string $configuredFile = null): array
+    {
+        if (!is_dir($root)) {
+            mkdir($root, 0777, true);
+        }
+
         return (new RevisionResolver(
-            root: $this->root,
+            root: $root,
             lockPath: $this->root . '/composer.lock',
             configuredEnv: $configuredEnv,
             configuredFile: $configuredFile,
@@ -204,6 +219,69 @@ class RevisionResolverTest extends TestCase
         $this->assertNull($this->resolve()['commit']);
 
         $this->write('.git/HEAD', "ref: refs/heads/../../../secret\n");
+        $this->assertNull($this->resolve()['commit']);
+    }
+
+    public function testAGitDirectoryAboveTheRootIsFound(): void
+    {
+        $this->write('.git/HEAD', self::SHA . "\n");
+
+        $this->assertSame([self::SHA, 'git'], $this->commit($this->resolveAt($this->root . '/src')), 'one level up');
+        $this->assertSame([self::SHA, 'git'], $this->commit($this->resolveAt($this->root . '/apps/site')), 'two levels up');
+        $this->assertSame([self::SHA, 'git'], $this->commit($this->resolveAt($this->root . '/a/b/c')), 'three levels up');
+    }
+
+    public function testAGitDirectoryMoreThanThreeLevelsUpIsIgnored(): void
+    {
+        $this->write('.git/HEAD', self::SHA . "\n");
+
+        $this->assertNull($this->resolveAt($this->root . '/a/b/c/d')['commit']);
+    }
+
+    public function testTheNearestGitDirectoryWins(): void
+    {
+        $this->write('.git/HEAD', self::OTHER . "\n");
+        $this->write('src/.git/HEAD', self::SHA . "\n");
+
+        $this->assertSame([self::SHA, 'git'], $this->commit($this->resolveAt($this->root . '/src')));
+    }
+
+    public function testASymbolicHeadAboveTheRootIsResolvedFromTheSameGitDirectory(): void
+    {
+        $this->write('.git/HEAD', "ref: refs/heads/main\n");
+        $this->write('.git/packed-refs', self::SHA . " refs/heads/main\n");
+        $this->write('src/.git-not-a-clone', '');
+
+        $this->assertSame([self::SHA, 'git'], $this->commit($this->resolveAt($this->root . '/src')));
+    }
+
+    public function testAGitFilePointingAtASeparateGitDirectoryIsFollowed(): void
+    {
+        $this->write('store/HEAD', self::SHA . "\n");
+        $this->write('site/.git', "gitdir: ../store\n");
+
+        $this->assertSame([self::SHA, 'git'], $this->commit($this->resolveAt($this->root . '/site/src')));
+    }
+
+    public function testAGitFilePointingOutsideTheBoundIsIgnored(): void
+    {
+        $elsewhere = sys_get_temp_dir() . '/phonehome-revision-elsewhere-' . bin2hex(random_bytes(6));
+        mkdir($elsewhere, 0777, true);
+        file_put_contents($elsewhere . '/HEAD', self::SHA . "\n");
+
+        try {
+            $this->write('a/b/site/.git', 'gitdir: ' . $elsewhere . "\n");
+
+            $this->assertNull($this->resolveAt($this->root . '/a/b/site/src')['commit']);
+        } finally {
+            exec('rm -rf ' . escapeshellarg($elsewhere));
+        }
+    }
+
+    public function testAGitFileWithoutAPointerIsNotAClone(): void
+    {
+        $this->write('.git', "something else\n");
+
         $this->assertNull($this->resolve()['commit']);
     }
 
