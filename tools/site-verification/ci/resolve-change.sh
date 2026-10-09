@@ -10,7 +10,9 @@
 #   PACKAGE         The Composer package to move, e.g. craftcms/cms.
 #   VERSION         The exact version to move it to.
 #   GITHUB_OUTPUT   Where `moved` (one "name before -> after" per line), `count`, `scope` (how far
-#                   the update had to widen) and `scope_reason` (why it widened) are written.
+#                   the update had to widen), `scope_reason` (why it widened), and from
+#                   schema-sync.mjs `schema_changes`, `apply_locally` and `project_config_files`
+#                   are written.
 
 set -euo pipefail
 
@@ -25,7 +27,14 @@ if [ ! -f composer.json ] || [ ! -f composer.lock ]; then
 fi
 
 cp composer.lock composer.lock.before
-trap 'rm -f composer.lock.before composer.err' EXIT
+trap 'rm -f composer.lock.before composer.err migrations.before.json' EXIT
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# The site as it is, installed, so each Craft plugin's migrations can be recorded before the update.
+# A new migration that writes project config cannot be reproduced from a schema version, and the
+# only way to tell a new migration from an old one is to have seen the old set.
+composer install --no-interaction --no-scripts --quiet
+node "$here/schema-sync.mjs" snapshot migrations.before.json
 
 # The narrowest update that resolves, widened one step at a time. Moving every dependency at once
 # turned a one-plugin security release into a 48-package change on the first real site, most of
@@ -98,6 +107,11 @@ echo "scope=${scope}" >> "$out"
 # this script has just done, so it is dropped rather than repeated to a reviewer.
 reason="${reason% Make sure you list it as an argument for the update command.}"
 echo "scope_reason=$(printf '%s' "$reason" | tr -d '\r\n' | cut -c1-300)" >> "$out"
+# Project config records each plugin's schema version, and Craft's. When the update raised one, the
+# YAML is brought into step here, because a deploy that migrates the database and then finds the
+# YAML still naming the old version stops before the release goes live.
+node "$here/schema-sync.mjs" apply composer.lock.before migrations.before.json >/dev/null
+
 {
     echo 'moved<<MOVED'
     printf '%s\n' "$moved"

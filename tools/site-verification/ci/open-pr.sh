@@ -29,4 +29,11 @@ else
     echo "Opened ${url}."
 fi
 
+# Best effort: creating or adding a label can need more than the job's token is granted, and the
+# warning at the top of the body already says the same thing.
+if [ -n "${APPLY_LOCALLY:-}" ]; then
+    gh pr edit "$url" --add-label "phone-home: apply locally" >/dev/null 2>&1 \
+        || echo "::warning::Could not add the 'phone-home: apply locally' label to ${url}; the warning at the top of its body still stands."
+fi
+
 echo "url=${url}" >> "$out"

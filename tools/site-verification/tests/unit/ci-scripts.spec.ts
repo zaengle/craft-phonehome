@@ -561,6 +561,8 @@ function siteInSubdirectory(answers: Answers = {}): { root: string; app: string;
     writeFileSync(
         join(bin, 'composer'),
         `#!/usr/bin/env bash
+# Installing the site as it is, before the update, changes nothing here and is not an update step.
+[ "$1" = install ] && exit 0
 echo "$* in $(pwd)" >> '${calls}'
 case "$*" in
   *--with-all-dependencies*) code=${answers.all ?? 0} ;;
@@ -608,7 +610,11 @@ test.describe('resolve-change.sh', () => {
 
         expect(result.status, result.stderr).toBe(0);
         expect(result.calls).toEqual([`update verbb/formie:3.1.43 --no-interaction --no-scripts in ${site.app}`]);
-        expect(result.outputs).toBe('count=1\nscope=exact\nscope_reason=\nmoved<<MOVED\nverbb/formie 3.1.42 -> 3.1.43\nMOVED\n');
+        expect(result.outputs).toBe(
+            'count=1\nscope=exact\nscope_reason=\n' +
+                'schema_changes<<SCHEMA\nSCHEMA\napply_locally<<SCHEMA\nSCHEMA\nproject_config_files=\n' +
+                'moved<<MOVED\nverbb/formie 3.1.42 -> 3.1.43\nMOVED\n',
+        );
         // Nothing is written at the repository root, and the working files are cleaned up.
         expect(existsSync(join(site.root, 'composer.lock'))).toBe(false);
         expect(existsSync(join(site.app, 'composer.lock.before'))).toBe(false);
