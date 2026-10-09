@@ -166,6 +166,18 @@ decide that a push is a remediation, and pass the package and version to the com
 off for every such site, so a change to them is a breaking change and is called out in the
 changelog. Their formats are pinned by tests.
 
+## Project config and schema versions
+
+A remediation keeps project config in step with the schema versions it installs: it rewrites
+each moved plugin's `schemaVersion`, and Craft's, in `config/project/` and commits it with the
+lock. It cannot reproduce a migration that writes project config, so when an update brings a new
+one, the pull request leads with a warning to apply it locally, the branch is not deployed or
+compared, and the workflow tries to add the `phone-home: apply locally` label. Create that label
+in the site's repository once; the job's token can add an existing label but not create one. The
+check for such migrations reads their source, so it is a heuristic: it catches `set` and `remove`
+on the project config service and the Craft methods that save project config, and it ignores
+migrations that only read it.
+
 ## Outcomes
 
 Results are four states rather than pass and fail, because the difference between them is the thing
