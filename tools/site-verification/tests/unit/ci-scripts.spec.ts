@@ -527,7 +527,7 @@ test.describe('summarise.mjs', () => {
 
 /** How the stand-in `composer` answers each of the three update steps the script may try. */
 type Step = 'exact' | 'dependencies' | 'all';
-type Answers = Partial<Record<Step, number>>;
+type Answers = Partial<Record<Step | 'install', number>>;
 
 const CONFLICT = `Your requirements could not be resolved to an installable set of packages.
 
@@ -541,7 +541,7 @@ const CONFLICT = `Your requirements could not be resolved to an installable set 
  * every call, and answers each update step with the exit status the test gives it: 0 moves
  * Formie in the lock file it finds where it is run, as the real one would, and 2 prints a
  * dependency conflict after scribbling on the lock file, which the script must undo before its
- * next attempt.
+ * next attempt. `install` is the exit status of installing the site as it was, before the update.
  */
 function siteInSubdirectory(answers: Answers = {}): { root: string; app: string; bin: string; calls: string } {
     // Resolved, because the temporary directory is reached through a symlink on macOS and the
@@ -562,7 +562,7 @@ function siteInSubdirectory(answers: Answers = {}): { root: string; app: string;
         join(bin, 'composer'),
         `#!/usr/bin/env bash
 # Installing the site as it is, before the update, changes nothing here and is not an update step.
-[ "$1" = install ] && exit 0
+[ "$1" = install ] && exit ${answers.install ?? 0}
 echo "$* in $(pwd)" >> '${calls}'
 case "$*" in
   *--with-all-dependencies*) code=${answers.all ?? 0} ;;
@@ -612,7 +612,8 @@ test.describe('resolve-change.sh', () => {
         expect(result.calls).toEqual([`update verbb/formie:3.1.43 --no-interaction --no-scripts in ${site.app}`]);
         expect(result.outputs).toBe(
             'count=1\nscope=exact\nscope_reason=\n' +
-                'schema_changes<<SCHEMA\nSCHEMA\napply_locally<<SCHEMA\nSCHEMA\nproject_config_files=\n' +
+                'schema_changes<<SCHEMA\nSCHEMA\napply_locally<<SCHEMA\nSCHEMA\nschema_unknown<<SCHEMA\nSCHEMA\nproject_config_files=\n' +
+                'schema_error=\n' +
                 'moved<<MOVED\nverbb/formie 3.1.42 -> 3.1.43\nMOVED\n',
         );
         // Nothing is written at the repository root, and the working files are cleaned up.
@@ -668,6 +669,17 @@ test.describe('resolve-change.sh', () => {
         expect(result.calls).toHaveLength(1);
         expect(result.stdout).toContain('which is not a dependency conflict, so no broader update was tried');
         expect(result.stderr).toContain('required authentication');
+    });
+
+    test('a site that cannot be installed as it was still gets its update, with the schema check said to be skipped', () => {
+        const site = siteInSubdirectory({ install: 1 });
+        const result = resolveChange(site.app, site);
+
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.outputs).toContain('moved<<MOVED\nverbb/formie 3.1.42 -> 3.1.43\nMOVED\n');
+        expect(result.outputs).toContain('schema_error=The site could not be installed as it was before the update, so schema versions and new migrations were not checked.\n');
+        expect(result.outputs).toContain('schema_changes<<SCHEMA\nSCHEMA\napply_locally<<SCHEMA\nSCHEMA\nschema_unknown<<SCHEMA\nSCHEMA\nproject_config_files=\n');
+        expect(result.stdout).toContain('::warning::The site could not be installed as it was before the update');
     });
 
     test('run from a root with no Composer files, it names working_directory rather than inventing a lock file', () => {

@@ -33,8 +33,15 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # The site as it is, installed, so each Craft plugin's migrations can be recorded before the update.
 # A new migration that writes project config cannot be reproduced from a schema version, and the
 # only way to tell a new migration from an old one is to have seen the old set.
-composer install --no-interaction --no-scripts --quiet
-node "$here/schema-sync.mjs" snapshot migrations.before.json
+#
+# Best effort: the security update matters more than the project config check, so a failure here
+# is reported, in the run and in the pull request, rather than allowed to stop the remediation.
+schema_error=""
+if ! composer install --no-interaction --no-scripts --quiet; then
+    schema_error="The site could not be installed as it was before the update, so schema versions and new migrations were not checked."
+elif ! node "$here/schema-sync.mjs" snapshot migrations.before.json; then
+    schema_error="The site's migrations could not be recorded before the update, so schema versions and new migrations were not checked."
+fi
 
 # The narrowest update that resolves, widened one step at a time. Moving every dependency at once
 # turned a one-plugin security release into a 48-package change on the first real site, most of
@@ -110,7 +117,15 @@ echo "scope_reason=$(printf '%s' "$reason" | tr -d '\r\n' | cut -c1-300)" >> "$o
 # Project config records each plugin's schema version, and Craft's. When the update raised one, the
 # YAML is brought into step here, because a deploy that migrates the database and then finds the
 # YAML still naming the old version stops before the release goes live.
-node "$here/schema-sync.mjs" apply composer.lock.before migrations.before.json >/dev/null
+if [ -z "$schema_error" ] && ! GITHUB_OUTPUT="$out" node "$here/schema-sync.mjs" apply composer.lock.before migrations.before.json; then
+    schema_error="Project config could not be brought into step with the update's schema versions."
+fi
+
+if [ -n "$schema_error" ]; then
+    echo "::warning::${schema_error} Check project config before merging."
+    printf 'schema_changes<<SCHEMA\nSCHEMA\napply_locally<<SCHEMA\nSCHEMA\nschema_unknown<<SCHEMA\nSCHEMA\nproject_config_files=\n' >> "$out"
+fi
+echo "schema_error=${schema_error}" >> "$out"
 
 {
     echo 'moved<<MOVED'
