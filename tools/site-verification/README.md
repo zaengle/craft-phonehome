@@ -136,7 +136,10 @@ Three things decide whether a pair is comparable, and all three are enforced rat
   local bundle can never be used against staging even by accident.
 - **The run id.** Both halves must share one, and it must be new. Re-capturing over a sealed
   baseline is refused, because otherwise a comparison that found a regression could be made to pass
-  by running capture again.
+  by running capture again. A site's own pair should use `<commit SHA>-<GitHub run id>-<attempt>`.
+  It must begin with the full SHA of the deployed commit, because Phone Home links a comparison to
+  a security remediation by reading that SHA from the start of the run id; an id that does not begin
+  with it is recorded but never linked to a patch.
 
 Note that **CI captures its own baselines**. A baseline taken on an Apple Silicon Mac records
 `linux-arm64` and will never match a GitHub runner's `linux-x64`; the origins differ too. Local

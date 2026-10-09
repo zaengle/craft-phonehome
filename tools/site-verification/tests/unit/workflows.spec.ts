@@ -298,3 +298,14 @@ test('the Playwright image matches the Playwright the runner installs', () => {
         expect(new Set(images)).toEqual(new Set([version]));
     }
 });
+
+test('the example pair mints a run id Phone Home can link, unique per run', () => {
+    // Phone Home reads the commit from the start of the run id; the GitHub run id keeps a push and a
+    // run started by hand on the same commit apart. The first onboarded site hit both problems.
+    const example = readFileSync(new URL('../../examples/verify-on-deploy.yml', import.meta.url).pathname, 'utf8');
+
+    expect(example).toContain('run_id: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}');
+    expect(example).toMatch(/run_id: \$\{\{ github\.sha \}\}-/);
+    expect(example).toContain('${{ github.event.deployment.sha }}-deploy-${{ github.event.deployment.id }}');
+    expect(example).not.toMatch(/`deploy-\$\{\{ github\.event\.deployment\.id \}\}`/);
+});
