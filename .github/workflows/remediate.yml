@@ -220,6 +220,8 @@ jobs:
       schema_changes: ${{ steps.resolve.outputs.schema_changes }}
       apply_locally: ${{ steps.resolve.outputs.apply_locally }}
       project_config_files: ${{ steps.resolve.outputs.project_config_files }}
+      schema_unknown: ${{ steps.resolve.outputs.schema_unknown }}
+      schema_error: ${{ steps.resolve.outputs.schema_error }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -284,7 +286,10 @@ jobs:
   # succeeded, so the pull request can say whether the comparison rendered this change at all.
   deploy:
     needs: [check, prepare, baseline]
-    if: always() && needs.check.outputs.has_pr == '0' && needs.baseline.result == 'success' && needs.baseline.outputs.overall == 'passed' && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
+    # A branch whose update has to be applied locally is not deployed: its new migrations write
+    # project config that only the local run produces, and deploying it would leave the environment
+    # in a state the eventual commit does not describe.
+    if: always() && needs.check.outputs.has_pr == '0' && needs.baseline.result == 'success' && needs.baseline.outputs.overall == 'passed' && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped') && needs.prepare.outputs.apply_locally == ''
     runs-on: ubuntu-latest
     outputs:
       deployed: ${{ steps.deploy.outputs.deployed }}
@@ -414,6 +419,8 @@ jobs:
           SCOPE_REASON: ${{ needs.prepare.outputs.scope_reason }}
           SCHEMA_CHANGES: ${{ needs.prepare.outputs.schema_changes }}
           APPLY_LOCALLY: ${{ needs.prepare.outputs.apply_locally }}
+          SCHEMA_UNKNOWN: ${{ needs.prepare.outputs.schema_unknown }}
+          SCHEMA_ERROR: ${{ needs.prepare.outputs.schema_error }}
           BASELINE: ${{ needs.baseline.outputs.overall }}
           BASELINE_SUMMARY: ${{ needs.baseline.outputs.summary }}
           DEPLOYED: ${{ needs.deploy.outputs.deployed }}

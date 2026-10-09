@@ -261,6 +261,19 @@ test('how far the Composer update reached is carried into the pull request body'
     expect(job('pull_request')).toContain('SCOPE_REASON: ${{ needs.prepare.outputs.scope_reason }}');
 });
 
+test('a branch whose update has to be applied locally is not deployed', () => {
+    // Its new migrations write project config only the local run produces, so a deploy would leave
+    // the environment in a state the eventual commit does not describe.
+    expect(job('deploy').match(/\n {4}if: (.*)\n/)?.[1]).toContain("&& needs.prepare.outputs.apply_locally == ''");
+});
+
+test('what the schema check could not do is carried into the pull request body', () => {
+    expect(job('prepare')).toContain('schema_unknown: ${{ steps.resolve.outputs.schema_unknown }}');
+    expect(job('prepare')).toContain('schema_error: ${{ steps.resolve.outputs.schema_error }}');
+    expect(job('pull_request')).toContain('SCHEMA_UNKNOWN: ${{ needs.prepare.outputs.schema_unknown }}');
+    expect(job('pull_request')).toContain('SCHEMA_ERROR: ${{ needs.prepare.outputs.schema_error }}');
+});
+
 test('the pull request step can link the patch even when Phone Home could not be reached', () => {
     expect(job('pull_request')).toContain('DASHBOARD_ORIGIN: ${{ inputs.dashboard_origin }}');
     expect(remediate).not.toMatch(/patch #\$/);
