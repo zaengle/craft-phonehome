@@ -1,5 +1,14 @@
 # Release Notes for Craft Phone Home Plugin
 
+## [1.8.4] - Unreleased
+
+This release fixes how the plugin finds the deployed commit on a site that keeps its Craft application in a subdirectory. The API schema stays at 1.6.0, because the `revision` object keeps its shape.
+
+- The plugin now looks for `.git` at Craft's root and then in each parent directory up to three levels above it. Before this, a site with Craft in `src/` and the repository above it, which is a common layout, reported no commit at all, because `.git/HEAD` was only looked for inside `src/`. The runner then fell back to the lock file fingerprint, and a deploy that moved no Composer package had the same fingerprint before and after, so the comparison's wait was satisfied at once and could capture the environment before the host had finished deploying.
+- A `.git` that is a file rather than a directory, which a worktree or a submodule checkout leaves behind, is followed to the git directory it names, as long as that directory sits within the same bound.
+- The `REVISION` file is still read at Craft's root only, and the configured `revisionFile` still cannot leave the root.
+- The example callers now reference the `1.8.4` tag.
+
 ## [1.8.3] - 2026-10-07
 
 This release lets the environment say exactly what it is running, so a deployment is confirmed by the site itself rather than by whoever deployed it. The API schema moves to 1.6.0. The change is additive, so nothing existing is removed or renamed.

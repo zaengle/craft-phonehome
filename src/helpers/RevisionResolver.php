@@ -16,7 +16,9 @@ use Throwable;
  * deployed commit's SHA, read from the first source in a fixed order that answers: an environment
  * variable or file the site names in its config, then `PHONE_HOME_REVISION`, then a `REVISION`
  * file at the project root (which Envoyer and Capistrano-style deploys write), then `.git/HEAD`
- * when the release is a clone (which Forge produces).
+ * when the release is a clone (which Forge produces). A common Craft layout keeps the application
+ * in a subdirectory such as `src/` with `.git` above it, so `.git` is looked for at the root and
+ * then in each parent up to three levels above it.
  *
  * Nothing here may throw or slow the report. Every failure is a null for that field, and `.git` is
  * read as files rather than by running git.
@@ -28,6 +30,9 @@ class RevisionResolver
 
     /** The file read at the project root when no earlier source answers. */
     public const DEFAULT_FILE = 'REVISION';
+
+    /** How many directories above the root `.git` is looked for in, after the root itself. */
+    public const MAX_GIT_LEVELS_UP = 3;
 
     /** How much of `packed-refs` is searched before giving up on finding a branch in it. */
     public const MAX_PACKED_REFS_BYTES = 5 * 1024 * 1024;
@@ -193,7 +198,13 @@ class RevisionResolver
      */
     protected function readGitHead(): ?string
     {
-        $head = $this->readSmallFile('.git/HEAD');
+        $gitDir = $this->gitDir();
+
+        if ($gitDir === null) {
+            return null;
+        }
+
+        $head = $this->readSmallFileAt($gitDir . DIRECTORY_SEPARATOR . 'HEAD');
 
         if ($head === null) {
             return null;
@@ -211,13 +222,93 @@ class RevisionResolver
             return null;
         }
 
-        $loose = $this->readSmallFile('.git/' . $ref);
+        $loose = $this->readSmallFileAt($gitDir . DIRECTORY_SEPARATOR . $ref);
 
         if ($loose !== null) {
             return $loose;
         }
 
-        return $this->readPackedRef($ref);
+        return $this->readPackedRef($gitDir, $ref);
+    }
+
+    /**
+     * The git directory this release was checked out from, or null when there is none in reach.
+     *
+     * `.git` is looked for at the root first, then in each parent up to MAX_GIT_LEVELS_UP above
+     * it, stopping at the filesystem root. The first found wins. A `.git` that is a file rather
+     * than a directory is what a worktree or a submodule checkout has; it holds one line,
+     * `gitdir: <path>`, and that path is followed, but only to a directory within the same bound,
+     * so a pointer cannot lead the report anywhere a clone above the root could not.
+     */
+    protected function gitDir(): ?string
+    {
+        $dir = realpath($this->root);
+
+        if ($dir === false) {
+            return null;
+        }
+
+        $top = $dir;
+        $levels = [$dir];
+
+        for ($level = 0; $level < self::MAX_GIT_LEVELS_UP; $level++) {
+            $parent = dirname($top);
+
+            if ($parent === $top) {
+                break;
+            }
+
+            $top = $parent;
+            $levels[] = $parent;
+        }
+
+        foreach ($levels as $candidate) {
+            $git = $candidate . DIRECTORY_SEPARATOR . '.git';
+
+            if (is_dir($git)) {
+                return $git;
+            }
+
+            if (is_file($git)) {
+                return $this->followGitDirPointer($git, $candidate, $top);
+            }
+        }
+
+        return null;
+    }
+
+    /** Follows a `gitdir: <path>` pointer, relative to the file's directory, within the bound. */
+    protected function followGitDirPointer(string $file, string $base, string $top): ?string
+    {
+        $contents = $this->readSmallFileAt($file);
+
+        if ($contents === null || !str_starts_with(trim($contents), 'gitdir:')) {
+            return null;
+        }
+
+        $target = trim(substr(trim($contents), 7));
+
+        if ($target === '') {
+            return null;
+        }
+
+        if (!str_starts_with($target, '/') && !preg_match('~^[A-Za-z]:[\\\\/]~', $target)) {
+            $target = $base . DIRECTORY_SEPARATOR . $target;
+        }
+
+        $resolved = realpath($target);
+
+        if ($resolved === false || !is_dir($resolved)) {
+            return null;
+        }
+
+        $bound = rtrim($top, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+
+        if ($resolved !== rtrim($top, DIRECTORY_SEPARATOR) && !str_starts_with($resolved . DIRECTORY_SEPARATOR, $bound)) {
+            return null;
+        }
+
+        return $resolved;
     }
 
     /**
@@ -225,9 +316,9 @@ class RevisionResolver
      * packed-refs file of several megabytes, so it is streamed rather than loaded, and reading
      * stops after a fixed amount rather than slowing the report.
      */
-    protected function readPackedRef(string $ref): ?string
+    protected function readPackedRef(string $gitDir, string $ref): ?string
     {
-        $path = $this->path('.git/packed-refs');
+        $path = $gitDir . DIRECTORY_SEPARATOR . 'packed-refs';
         $handle = is_file($path) ? fopen($path, 'rb') : false;
 
         if ($handle === false) {
@@ -255,8 +346,12 @@ class RevisionResolver
     /** Reads a file under the root. A revision file holds one short line; anything large is not one. */
     protected function readSmallFile(string $relative): ?string
     {
-        $path = $this->path($relative);
+        return $this->readSmallFileAt($this->path($relative));
+    }
 
+    /** Reads a file by its full path, under the same size bound as readSmallFile(). */
+    protected function readSmallFileAt(string $path): ?string
+    {
         if (!is_file($path) || filesize($path) > 1024) {
             return null;
         }
