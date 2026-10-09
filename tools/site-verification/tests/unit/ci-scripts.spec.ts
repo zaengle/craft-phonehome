@@ -254,7 +254,8 @@ function fakePrGh(openUrl: string): { dir: string; calls: string } {
 echo "$*" >> '${calls}'
 case "$1 $2" in
   "pr list") echo '${openUrl}' ;;
-  "pr edit") exit 0 ;;
+  "pr edit") [ "$4" = --body-file ] && cp "$5" '${join(dir, 'edited')}'; exit 0 ;;
+  "pr view") printf '%s' "$PREVIOUS_BODY" ;;
   "pr create") echo "https://github.com/z/x/pull/26" ;;
   *) echo "unexpected gh $*" >&2; exit 64 ;;
 esac`,
@@ -264,10 +265,16 @@ esac`,
     return { dir, calls };
 }
 
-function openPr(openUrl: string) {
+/**
+ * Runs open-pr.sh with `body` as this run's body. `env` adds what the run detected, and
+ * PREVIOUS_BODY, which is what `gh pr view` answers for the open pull request.
+ */
+function openPr(openUrl: string, body = 'This run.\n', env: Record<string, string> = {}) {
     const gh = fakePrGh(openUrl);
     const outputs = join(gh.dir, 'outputs');
+    const bodyFile = join(gh.dir, 'pr-body.md');
     writeFileSync(outputs, '');
+    writeFileSync(bodyFile, body);
 
     const run = spawnSync('bash', [join(ci, 'open-pr.sh')], {
         env: {
@@ -276,12 +283,20 @@ function openPr(openUrl: string) {
             BRANCH: 'security/patch-31-site-2',
             BASE: 'main',
             TITLE: 'Security: craftcms/cms to 5.8.15',
-            BODY_FILE: '/tmp/pr-body.md',
+            BODY_FILE: bodyFile,
+            ...env,
         },
         encoding: 'utf8',
     });
+    const edited = join(gh.dir, 'edited');
 
-    return { status: run.status, stderr: run.stderr, outputs: readFileSync(outputs, 'utf8'), calls: readFileSync(gh.calls, 'utf8').trim().split('\n') };
+    return {
+        status: run.status,
+        stderr: run.stderr,
+        outputs: readFileSync(outputs, 'utf8'),
+        calls: readFileSync(gh.calls, 'utf8').trim().split('\n').map((call) => call.replace(bodyFile, 'BODY')),
+        edited: existsSync(edited) ? readFileSync(edited, 'utf8') : null,
+    };
 }
 
 test.describe('open-pr.sh', () => {
@@ -291,7 +306,7 @@ test.describe('open-pr.sh', () => {
         expect(result.status, result.stderr).toBe(0);
         expect(result.calls).toEqual([
             'pr list --head security/patch-31-site-2 --state open --json url --jq .[0].url // empty',
-            'pr create --draft --base main --head security/patch-31-site-2 --title Security: craftcms/cms to 5.8.15 --body-file /tmp/pr-body.md',
+            'pr create --draft --base main --head security/patch-31-site-2 --title Security: craftcms/cms to 5.8.15 --body-file BODY',
         ]);
         expect(result.outputs).toBe('url=https://github.com/z/x/pull/26\n');
     });
@@ -304,9 +319,28 @@ test.describe('open-pr.sh', () => {
         expect(result.status, result.stderr).toBe(0);
         expect(result.calls).toEqual([
             'pr list --head security/patch-31-site-2 --state open --json url --jq .[0].url // empty',
-            'pr edit https://github.com/z/x/pull/25 --body-file /tmp/pr-body.md',
+            'pr view https://github.com/z/x/pull/25 --json body --jq .body',
+            'pr edit https://github.com/z/x/pull/25 --body-file BODY',
         ]);
         expect(result.outputs).toBe('url=https://github.com/z/x/pull/25\n');
+        expect(result.edited).toBe('This run.\n');
+    });
+
+    const CAUTION = '> [!CAUTION]\n> **Apply this update locally before merging.** A migration in it writes project config.\n> - verbb/formie: m261001_000000_move_settings.php';
+
+    test('a re-run that skipped the migration check keeps the open pull request\'s warning at the top', () => {
+        const result = openPr('https://github.com/z/x/pull/25', 'This run.\n', { PREVIOUS_BODY: `${CAUTION}\n\nThe first run.\n` });
+
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.edited).toBe(`${CAUTION}\n\nThis run.\n`);
+    });
+
+    test('a run that moved packages did the migration check, so its body stands as written', () => {
+        const result = openPr('https://github.com/z/x/pull/25', 'This run.\n', { MOVED: 'verbb/formie 3.1.43 -> 3.1.46', PREVIOUS_BODY: `${CAUTION}\n\nThe first run.\n` });
+
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.calls.some((call) => call.startsWith('pr view'))).toBe(false);
+        expect(result.edited).toBe('This run.\n');
     });
 });
 
