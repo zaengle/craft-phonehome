@@ -50,18 +50,20 @@ function plugin(root: string, name: string, handle: string, className: string, s
 }
 
 const TABLE_ONLY = `<?php class m260927_000000_signature_access extends Migration { public function safeUp(): bool { $this->addColumn('{{%formie_fields}}', 'x', 'text'); return true; } }`;
+const READS_CONFIG = `<?php class m261002_000000_read extends Migration { public function safeUp(): bool { $x = Craft::$app->getProjectConfig()->get('plugins.formie.settings'); $this->update('{{%t}}', ['x' => $x]); return true; } }`;
+const SAVES_SETTINGS = `<?php class m261003_000000_save extends Migration { public function safeUp(): bool { Craft::$app->getPlugins()->savePluginSettings(Formie::getInstance(), []); return true; } }`;
 const WRITES_CONFIG = `<?php class m261001_000000_move_settings extends Migration { public function safeUp(): bool { Craft::$app->getProjectConfig()->set('plugins.formie.settings.x', 1); return true; } }`;
 
 /**
  * A site repository before and after a remediation: Formie moved, its schema went from 3.4.12 to
  * whatever `schema` is, and a migration was added. Returns the root and what apply() reported.
  */
-function site(options: { schema?: string; newMigration?: string; craft?: string } = {}) {
+function site(options: { schema?: string; newMigration?: string; craft?: string; project?: string; update?: (root: string) => Record<string, string> } = {}) {
     const root = mkdtempSync(join(tmpdir(), 'phv-schema-'));
     const before = { 'craftcms/cms': '5.11.1', 'verbb/formie': '3.1.43', 'nystudio107/craft-seomatic': '5.1.22', 'verbb/hidden': '1.0.0' };
 
     write(root, 'composer.json', '{}');
-    write(root, 'config/project/project.yaml', PROJECT);
+    write(root, 'config/project/project.yaml', options.project ?? PROJECT);
     write(root, 'composer.lock', lock(before));
     write(root, 'vendor/craftcms/cms/src/config/app.php', `<?php return ['schemaVersion' => '5.8.0.3'];`);
     plugin(root, 'verbb/formie', 'formie', 'Formie', '3.4.12', { 'm250101_000000_old.php': TABLE_ONLY.replace('m260927_000000_signature_access', 'm250101_000000_old') });
@@ -76,7 +78,8 @@ function site(options: { schema?: string; newMigration?: string; craft?: string 
     if (options.craft) {
         write(root, 'vendor/craftcms/cms/src/config/app.php', `<?php return ['schemaVersion' => '${options.craft}'];`);
     }
-    write(root, 'composer.lock', lock({ ...before, 'verbb/formie': '3.1.46', 'verbb/hidden': '2.0.0', ...(options.craft ? { 'craftcms/cms': '5.12.0' } : {}) }));
+    const added = options.update?.(root) ?? {};
+    write(root, 'composer.lock', lock({ ...before, 'verbb/formie': '3.1.46', 'verbb/hidden': '2.0.0', ...(options.craft ? { 'craftcms/cms': '5.12.0' } : {}), ...added }));
 
     return { root, result: apply(root, lockBefore, recorded), yaml: () => readFileSync(join(root, 'config/project/project.yaml'), 'utf8') };
 }
@@ -85,7 +88,7 @@ test.describe('schema-sync.mjs', () => {
     test('a plugin update that raises its schema version updates only that line of project config', () => {
         const { result, yaml } = site();
 
-        expect(result).toEqual({ changes: ['formie 3.4.12 -> 3.4.13'], applyLocally: [], files: ['config/project/project.yaml'] });
+        expect(result).toEqual({ changes: ['formie 3.4.12 -> 3.4.13'], applyLocally: [], unknown: [], files: ['config/project/project.yaml'] });
         expect(yaml()).toBe(PROJECT.replace('    schemaVersion: 3.4.12', '    schemaVersion: 3.4.13'));
         // dateModified is never touched; Craft re-reads project config from the file's mtime.
         expect(yaml()).toContain('dateModified: 1759860000');
@@ -94,7 +97,7 @@ test.describe('schema-sync.mjs', () => {
     test('an update that leaves the schema version alone changes nothing', () => {
         const { result, yaml } = site({ schema: '3.4.12' });
 
-        expect(result).toEqual({ changes: [], applyLocally: [], files: [] });
+        expect(result).toEqual({ changes: [], applyLocally: [], unknown: [], files: [] });
         expect(yaml()).toBe(PROJECT);
     });
 
@@ -123,6 +126,56 @@ test.describe('schema-sync.mjs', () => {
         expect(setSchemaVersion(PROJECT, 'plugins', ['navigation'], '1.0.0')).toBeNull();
     });
 
+    test('a new migration that writes project config leaves project config to the local run', () => {
+        const { result, yaml } = site({ newMigration: WRITES_CONFIG });
+
+        // Such a migration commonly skips its writes once project config names the new version.
+        expect(result).toEqual({ changes: [], applyLocally: ['verbb/formie: m260927_000000_new.php'], unknown: [], files: [] });
+        expect(yaml()).toBe(PROJECT);
+    });
+
+    test('a plugin the update newly added is not checked for new migrations', () => {
+        const install = `<?php class Install extends Migration { public function safeUp(): bool { Craft::$app->getProjectConfig()->set('plugins.fresh.x', 1); return true; } }`;
+        const { result } = site({
+            update: (root) => {
+                plugin(root, 'verbb/fresh', 'fresh', 'Fresh', '1.0.0', { 'Install.php': install });
+
+                return { 'verbb/fresh': '1.0.0' };
+            },
+        });
+
+        expect(result.applyLocally).toEqual([]);
+    });
+
+    test('a plugin in project config whose schema version cannot be read is reported as unknown', () => {
+        const { result, yaml } = site({
+            update: (root) => {
+                write(root, 'vendor/nystudio107/craft-seomatic/composer.json', JSON.stringify({ name: 'nystudio107/craft-seomatic', type: 'craft-plugin', autoload: { 'psr-4': { 'nystudio107\\seomatic\\': 'src/' } }, extra: { handle: 'seomatic', class: 'nystudio107\\seomatic\\Seomatic' } }));
+                write(root, 'vendor/nystudio107/craft-seomatic/src/Seomatic.php', `<?php\nclass Seomatic extends Plugin\n{\n    public function init(): void { $this->schemaVersion = self::SCHEMA; }\n}\n`);
+
+                return { 'nystudio107/craft-seomatic': '5.1.23' };
+            },
+        });
+
+        expect(result.unknown).toEqual(['seomatic']);
+        expect(yaml()).toContain("    schemaVersion: '3.0.13'\n");
+    });
+
+    test('a comment at column 0 inside the plugins block does not end it', () => {
+        const project = PROJECT.replace('plugins:\n', 'plugins:\n# Managed by Craft.\n');
+        const { result, yaml } = site({ project });
+
+        expect(result.changes).toEqual(['formie 3.4.12 -> 3.4.13']);
+        expect(yaml()).toBe(project.replace('    schemaVersion: 3.4.12', '    schemaVersion: 3.4.13'));
+    });
+
+    test('a migration that only reads project config is not flagged, and one that saves plugin settings is', () => {
+        expect(writesProjectConfig(READS_CONFIG)).toBe(false);
+        expect(writesProjectConfig(SAVES_SETTINGS)).toBe(true);
+        expect(site({ newMigration: READS_CONFIG }).result.applyLocally).toEqual([]);
+        expect(site({ newMigration: SAVES_SETTINGS }).result.applyLocally).toEqual(['verbb/formie: m260927_000000_new.php']);
+    });
+
     test('the pull request body lists the changes, and leads with the warning when a migration writes project config', () => {
         const body = (env: Record<string, string>) =>
             spawnSync('bash', [new URL('../../ci/pr-body.sh', import.meta.url).pathname], { env: { PATH: process.env.PATH ?? '', PATCH_ID: '90', ...env }, encoding: 'utf8' }).stdout;
@@ -135,5 +188,21 @@ test.describe('schema-sync.mjs', () => {
         expect(warned.startsWith('> [!CAUTION]\n> **Apply this update locally before merging.**')).toBe(true);
         expect(warned).toContain('> - verbb/formie: m261001_000000_move_settings.php');
         expect(body({})).not.toContain('Apply this update locally');
+    });
+
+    test('the pull request body warns when schema versions were not checked, or could not be read', () => {
+        const body = (env: Record<string, string>) =>
+            spawnSync('bash', [new URL('../../ci/pr-body.sh', import.meta.url).pathname], { env: { PATH: process.env.PATH ?? '', PATCH_ID: '90', ...env }, encoding: 'utf8' }).stdout;
+
+        const failed = body({ SCHEMA_ERROR: 'The site could not be installed as it was before the update, so schema versions and new migrations were not checked.' });
+
+        expect(failed).toContain('> [!WARNING]\n> The site could not be installed as it was before the update');
+        expect(failed).toContain('Check that project config names the schema versions this update installs');
+
+        const unknown = body({ SCHEMA_UNKNOWN: 'seomatic\nretour' });
+
+        expect(unknown).toContain('could not be read from their source');
+        expect(unknown).toContain('> - seomatic\n> - retour\n');
+        expect(body({})).not.toContain('[!WARNING]');
     });
 });

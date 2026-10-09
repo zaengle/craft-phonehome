@@ -15,7 +15,8 @@
  *   node schema-sync.mjs snapshot <file>                      before: record each plugin's migrations
  *   node schema-sync.mjs apply <lock.before> <file>           after: update project config, report
  *
- * `apply` writes `schema_changes`, `apply_locally` and `project_config_files` to $GITHUB_OUTPUT.
+ * `apply` writes `schema_changes`, `apply_locally`, `schema_unknown` and `project_config_files` to
+ * $GITHUB_OUTPUT, or to stdout when that is not set.
  * Nothing here boots Craft: versions are read from the installed source, and only the matching
  * `schemaVersion` lines are rewritten, so the rest of the YAML, `dateModified` included, is left
  * exactly as it was. Craft decides whether to re-read project config from the file's modification
@@ -57,13 +58,18 @@ export function setSchemaVersion(text, topKey, path, version) {
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
 
+        // A comment, even at column 0, is not a key and does not end the block it sits in.
+        if (line.trim().startsWith('#')) {
+            continue;
+        }
+
         if (/^\S/.test(line)) {
             inside = line.replace(/\s+$/, '') === `${topKey}:`;
             depth = 0;
             continue;
         }
 
-        if (!inside || line.trim() === '' || line.trim().startsWith('#')) {
+        if (!inside || line.trim() === '') {
             continue;
         }
 
@@ -102,9 +108,19 @@ export function setSchemaVersion(text, topKey, path, version) {
     return null;
 }
 
-/** Whether a migration's source touches project config, which a version number cannot capture. */
+/**
+ * Whether a migration's source writes project config, which a version number cannot capture.
+ *
+ * A heuristic over the source, not a guarantee. It matches a `set` or `remove` in a file that uses
+ * the project config service, and the Craft service methods that save project config for you. A
+ * migration that only reads project config is not matched.
+ */
+const SAVES_PROJECT_CONFIG = /->(?:savePluginSettings|saveField|saveFieldLayout|saveSection|saveEntryType|saveVolume|saveFilesystem|saveCategoryGroup|saveGlobalSet|saveTagGroup|saveUserGroup|saveUserLayout|saveSite|saveGroup|saveTransform|saveImageTransform)\s*\(/;
+
 export function writesProjectConfig(source) {
-    return /getProjectConfig\s*\(|->projectConfig\b|ProjectConfig::|projectConfig\s*\(\)/.test(source);
+    const usesService = /getProjectConfig\s*\(|->projectConfig\b/.test(source);
+
+    return (usesService && /->(?:set|remove)\s*\(/.test(source)) || SAVES_PROJECT_CONFIG.test(source);
 }
 
 /** The installed package's composer.json, or null. */
@@ -213,7 +229,7 @@ export function snapshot(root) {
 /**
  * Updates project config for every moved Craft plugin, and Craft, and reports what it did.
  *
- * @return {{ changes: string[], applyLocally: string[], files: string[] }}
+ * @return {{ changes: string[], applyLocally: string[], unknown: string[], files: string[] }}
  */
 export function apply(root, lockBefore, before) {
     const vendor = vendorDir(root);
@@ -222,6 +238,7 @@ export function apply(root, lockBefore, before) {
     const files = projectConfigFiles(root);
     const changes = [];
     const applyLocally = [];
+    const unknown = [];
     const touched = new Set();
 
     for (const name of Object.keys(now).sort()) {
@@ -236,35 +253,44 @@ export function apply(root, lockBefore, before) {
         }
 
         // A migration that writes project config cannot be reproduced from a version number, so
-        // the pull request says the update has to be applied locally instead.
-        for (const file of migrationFiles(described.migrations).filter((candidate) => !(before[name] ?? []).includes(candidate))) {
-            if (writesProjectConfig(readFileSync(join(described.migrations, file), 'utf8'))) {
-                applyLocally.push(`${name}: ${file}`);
-            }
-        }
+        // the pull request says the update has to be applied locally instead. A package the update
+        // newly added has no earlier migrations to compare with, and every one it ships, its
+        // install migration included, would look new, so it is not checked.
+        const flagged = was[name] === undefined
+            ? []
+            : migrationFiles(described.migrations).filter((candidate) => !(before[name] ?? []).includes(candidate) && writesProjectConfig(readFileSync(join(described.migrations, candidate), 'utf8')));
 
-        if (described.version === null) {
+        applyLocally.push(...flagged.map((file) => `${name}: ${file}`));
+
+        // Those migrations commonly skip their writes once project config already names the new
+        // schema version, so the version is left for the local `craft up` to write with them.
+        if (flagged.length > 0) {
             continue;
         }
 
-        for (const file of files) {
-            const result = setSchemaVersion(readFileSync(file, 'utf8'), described.topKey, described.path, described.version);
+        const holder = files.find((file) => setSchemaVersion(readFileSync(file, 'utf8'), described.topKey, described.path, '0') !== null);
 
-            if (result === null) {
-                continue;
-            }
+        if (holder === undefined) {
+            continue;
+        }
 
-            if (result.from !== described.version) {
-                writeFileSync(file, result.text);
-                touched.add(relative(root, file));
-                changes.push(`${described.label} ${result.from} -> ${described.version}`);
-            }
+        // Declared some other way than a literal on the main class, such as a constant or in init().
+        // Said rather than skipped silently, because the deploy may stop on it.
+        if (described.version === null) {
+            unknown.push(described.label);
+            continue;
+        }
 
-            break;
+        const result = setSchemaVersion(readFileSync(holder, 'utf8'), described.topKey, described.path, described.version);
+
+        if (result !== null && result.from !== described.version) {
+            writeFileSync(holder, result.text);
+            touched.add(relative(root, holder));
+            changes.push(`${described.label} ${result.from} -> ${described.version}`);
         }
     }
 
-    return { changes, applyLocally, files: [...touched].sort() };
+    return { changes, applyLocally, unknown, files: [...touched].sort() };
 }
 
 function main() {
@@ -281,10 +307,18 @@ function main() {
     if (command === 'apply') {
         const result = apply(root, readFileSync(args[0], 'utf8'), JSON.parse(readFileSync(args[1], 'utf8')));
         const block = (name, lines) => `${name}<<SCHEMA\n${lines.join('\n')}${lines.length > 0 ? '\n' : ''}SCHEMA\n`;
-        const text = block('schema_changes', result.changes) + block('apply_locally', result.applyLocally) + `project_config_files=${result.files.join(' ')}\n`;
+        const text =
+            block('schema_changes', result.changes) +
+            block('apply_locally', result.applyLocally) +
+            block('schema_unknown', result.unknown) +
+            `project_config_files=${result.files.join(' ')}\n`;
 
-        if (out) appendFileSync(out, text);
-        process.stdout.write(text);
+        // Where the caller's other outputs go, or the terminal when it has none.
+        if (out) {
+            appendFileSync(out, text);
+        } else {
+            process.stdout.write(text);
+        }
 
         return;
     }
