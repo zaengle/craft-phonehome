@@ -309,3 +309,11 @@ test('the example pair mints a run id Phone Home can link, unique per run', () =
     expect(example).toContain('${{ github.event.deployment.sha }}-deploy-${{ github.event.deployment.id }}');
     expect(example).not.toMatch(/`deploy-\$\{\{ github\.event\.deployment\.id \}\}`/);
 });
+
+test('the remediation title and commit message keep the format sites rely on', () => {
+    // Sites recognise a remediation merge from these strings and read the patch, package and version
+    // from them. A change here must be deliberate and called out as breaking, not discovered by a site.
+    expect(job('pull_request')).toContain("TITLE: 'Security: ${{ inputs.package }} to ${{ inputs.version }}'");
+    expect(job('prepare')).toContain('git commit -m "Security: $PACKAGE to $VERSION (Phone Home patch $PATCH_ID)"');
+    expect(readFileSync(new URL('../../README.md', import.meta.url).pathname, 'utf8')).toContain('`security/patch-<patch>-site-<site>`');
+});

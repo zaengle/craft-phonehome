@@ -150,6 +150,22 @@ and `PHV_BASIC_AUTH_PASS`. These credentials cover the browser and the plugin AP
 same origin. A separate `PHV_API_ORIGIN` receives only the Phone Home token. Without credentials a
 protected API makes the run inconclusive, and protected pages cannot be verified.
 
+## What a remediation leaves behind
+
+Sites may rely on three strings the shared `remediate.yml` produces, to recognise a remediation
+merge after it lands and to read the patch, package and version from it:
+
+- **The branch**, named by Phone Home: `security/patch-<patch>-site-<site>`.
+- **The pull request title**: `Security: <package> to <version>`.
+- **The commit message**: `Security: <package> to <version> (Phone Home patch <patch>)`. It
+  survives merge, rebase and squash merges whose body carries the commit messages.
+
+A site's `verify-on-deploy.yml` can, for example, read the pushed commit's pull request branch to
+decide that a push is a remediation, and pass the package and version to the comparison as
+`expect_package` and `expect_version`. Changing any of these three strings would quietly turn that
+off for every such site, so a change to them is a breaking change and is called out in the
+changelog. Their formats are pinned by tests.
+
 ## Outcomes
 
 Results are four states rather than pass and fail, because the difference between them is the thing
