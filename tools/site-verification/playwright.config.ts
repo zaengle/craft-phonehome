@@ -1,6 +1,6 @@
 import { defineConfig } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { runConfig } from './src/config';
+import { runConfig, siteAccessHeaders } from './src/config';
 import {
     bundleObjections,
     bundlePaths,
@@ -34,7 +34,7 @@ const config = runConfig();
 const paths = bundlePaths(config.bundleDir);
 const VIEWPORT = { width: 1440, height: 900 };
 // Staging's credentials also protect its API, but must not be sent to a separate API host.
-const apiBasicAuth = new URL(config.apiOrigin).origin === new URL(config.origin).origin ? config.basicAuth : null;
+const apiAccess = new URL(config.apiOrigin).origin === new URL(config.origin).origin ? siteAccessHeaders(config) : {};
 
 // Playwright evaluates this config file again in every worker, so each of these side effects would
 // otherwise run twice: two API fetches, and a second rewrite of the frozen manifest from a later
@@ -123,7 +123,7 @@ async function prepareCapture(): Promise<void> {
     rmSync(paths.environment, { force: true });
     rmSync(`${config.bundleDir}/baseline-unstored.txt`, { force: true });
 
-    const report = await fetchReport(config.apiOrigin, config.token, config.insecureTls, apiBasicAuth);
+    const report = await fetchReport(config.apiOrigin, config.token, config.insecureTls, apiAccess);
 
     if (isAbort(report)) {
         writeBundle(config.bundleDir, report);
@@ -188,7 +188,7 @@ async function prepareCompare(): Promise<void> {
     // Confirm the site is actually answering before any page result is believed. A host that has
     // gone away can still serve a router's 404 for every path, which reads as a page-by-page
     // failure when it is really an inability to verify anything at all.
-    const current = await fetchReport(config.apiOrigin, config.token, config.insecureTls, apiBasicAuth);
+    const current = await fetchReport(config.apiOrigin, config.token, config.insecureTls, apiAccess);
 
     if (isAbort(current)) {
         writeBundle(config.bundleDir, current);
@@ -247,7 +247,7 @@ async function waitForDeploy(lockPath: string): Promise<boolean> {
     const outcome = await waitForLock(
         expected,
         async () => {
-            const report = await fetchReport(config.apiOrigin, config.token, config.insecureTls, apiBasicAuth);
+            const report = await fetchReport(config.apiOrigin, config.token, config.insecureTls, apiAccess);
 
             return isAbort(report) ? `${report.reason}: ${report.detail.join(' ')}` : { versions: readPackages(report.payload), ...readReportedRevision(report.payload) };
         },
