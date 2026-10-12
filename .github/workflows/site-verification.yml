@@ -112,6 +112,13 @@ on:
         required: false
       basic_auth_password:
         required: false
+      cf_access_client_id:
+        description: >-
+          Client ID of a Cloudflare Access service token, if Access sits in front of the
+          environment. Sent with the client secret to the site's own origin only.
+        required: false
+      cf_access_client_secret:
+        required: false
     outputs:
       overall:
         description: >-
@@ -163,7 +170,7 @@ jobs:
     # Note that a baseline captured on an Apple Silicon Mac is `linux-arm64` and will never match a
     # GitHub runner's `linux-x64`. CI captures its own baselines; local ones are for local work.
     container:
-      image: mcr.microsoft.com/playwright:v1.49.1-noble
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
 
     steps:
       - name: Check out the runner
@@ -244,6 +251,8 @@ jobs:
           PHV_DEPLOY_TIMEOUT: ${{ inputs.deploy_timeout }}
           PHV_BASIC_AUTH_USER: ${{ secrets.basic_auth_user }}
           PHV_BASIC_AUTH_PASS: ${{ secrets.basic_auth_password }}
+          PHV_CF_ACCESS_CLIENT_ID: ${{ secrets.cf_access_client_id }}
+          PHV_CF_ACCESS_CLIENT_SECRET: ${{ secrets.cf_access_client_secret }}
         run: |
           case "$PHV_MODE" in capture|compare) ;; *) echo 'Invalid verification mode' >&2; exit 1 ;; esac
           npm run --silent "$PHV_MODE"

@@ -66,7 +66,7 @@ export function bundlePaths(bundleDir: string) {
  * pointing the runner at a local DDEV origin cannot quietly relax certificate checking for anything
  * else the run does.
  */
-function postJson(url: string, token: string, insecureTls: boolean, body = '{}', basicAuth: { username: string; password: string } | null = null): Promise<{ status: number; body: string }> {
+function postJson(url: string, token: string, insecureTls: boolean, body = '{}', siteHeaders: Record<string, string> = {}): Promise<{ status: number; body: string }> {
     const target = new URL(url);
     const send = target.protocol === 'https:' ? httpsRequest : httpRequest;
 
@@ -78,7 +78,7 @@ function postJson(url: string, token: string, insecureTls: boolean, body = '{}',
                 timeout: 15_000,
                 rejectUnauthorized: !insecureTls,
                 headers: {
-                    ...(basicAuth === null ? {} : { Authorization: `Basic ${Buffer.from(`${basicAuth.username}:${basicAuth.password}`).toString('base64')}` }),
+                    ...siteHeaders,
                     'X-Auth-Token': token,
                     Accept: 'application/json',
                     'Content-Type': 'application/json',
@@ -441,11 +441,11 @@ export function postArtifact(
  * reports it disabled, and a site with a typo reports it invalid -- none of which may be treated as
  * a suite that ran and passed.
  */
-export async function fetchReport(apiOrigin: string, token: string, insecureTls = false, basicAuth: { username: string; password: string } | null = null): Promise<{ manifest: Manifest; payload: Record<string, unknown> } | Abort> {
+export async function fetchReport(apiOrigin: string, token: string, insecureTls = false, siteHeaders: Record<string, string> = {}): Promise<{ manifest: Manifest; payload: Record<string, unknown> } | Abort> {
     let payload: Record<string, unknown>;
 
     try {
-        const response = await postJson(`${apiOrigin}/actions/phonehome/api`, token, insecureTls, '{}', basicAuth);
+        const response = await postJson(`${apiOrigin}/actions/phonehome/api`, token, insecureTls, '{}', siteHeaders);
 
         if (response.status < 200 || response.status >= 300) {
             return { reason: 'api_unavailable', detail: [`The plugin API answered ${response.status}.`] };

@@ -1,6 +1,6 @@
 import { defineConfig } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { runConfig } from './src/config';
+import { runConfig, siteAccessHeaders } from './src/config';
 import {
     bundleObjections,
     bundlePaths,
@@ -34,7 +34,7 @@ const config = runConfig();
 const paths = bundlePaths(config.bundleDir);
 const VIEWPORT = { width: 1440, height: 900 };
 // Staging's credentials also protect its API, but must not be sent to a separate API host.
-const apiBasicAuth = new URL(config.apiOrigin).origin === new URL(config.origin).origin ? config.basicAuth : null;
+const apiAccess = new URL(config.apiOrigin).origin === new URL(config.origin).origin ? siteAccessHeaders(config) : {};
 
 // Playwright evaluates this config file again in every worker, so each of these side effects would
 // otherwise run twice: two API fetches, and a second rewrite of the frozen manifest from a later
@@ -77,6 +77,14 @@ async function prepareBundle(): Promise<void> {
     // A stale gate file from an earlier attempt would otherwise be read as this run's outcome.
     rmSync(paths.abort, { force: true });
     rmSync(paths.deploy, { force: true });
+
+    // Reported like any other refusal, so it reaches the result and the dashboard, rather than
+    // thrown at config load, where a CI run dies before there is anything to report.
+    if (config.cfAccessError !== null) {
+        abort('misconfigured', [config.cfAccessError]);
+
+        return;
+    }
 
     if (config.mode === 'capture') {
         await prepareCapture();
@@ -123,7 +131,7 @@ async function prepareCapture(): Promise<void> {
     rmSync(paths.environment, { force: true });
     rmSync(`${config.bundleDir}/baseline-unstored.txt`, { force: true });
 
-    const report = await fetchReport(config.apiOrigin, config.token, config.insecureTls, apiBasicAuth);
+    const report = await fetchReport(config.apiOrigin, config.token, config.insecureTls, apiAccess);
 
     if (isAbort(report)) {
         writeBundle(config.bundleDir, report);
@@ -188,7 +196,7 @@ async function prepareCompare(): Promise<void> {
     // Confirm the site is actually answering before any page result is believed. A host that has
     // gone away can still serve a router's 404 for every path, which reads as a page-by-page
     // failure when it is really an inability to verify anything at all.
-    const current = await fetchReport(config.apiOrigin, config.token, config.insecureTls, apiBasicAuth);
+    const current = await fetchReport(config.apiOrigin, config.token, config.insecureTls, apiAccess);
 
     if (isAbort(current)) {
         writeBundle(config.bundleDir, current);
@@ -247,7 +255,7 @@ async function waitForDeploy(lockPath: string): Promise<boolean> {
     const outcome = await waitForLock(
         expected,
         async () => {
-            const report = await fetchReport(config.apiOrigin, config.token, config.insecureTls, apiBasicAuth);
+            const report = await fetchReport(config.apiOrigin, config.token, config.insecureTls, apiAccess);
 
             return isAbort(report) ? `${report.reason}: ${report.detail.join(' ')}` : { versions: readPackages(report.payload), ...readReportedRevision(report.payload) };
         },
@@ -327,7 +335,17 @@ export default defineConfig({
         // Applied to the site being rendered only. Without these a staging environment behind an
         // auth prompt is photographed as the prompt, and every page reports its required element
         // missing -- a `failed` that says nothing about the deploy.
-        ...(config.basicAuth === null ? {} : { httpCredentials: config.basicAuth }),
+        // Answered to the site's own origin only. Without `origin`, a third-party host on the page
+        // that challenged for basic auth would be handed staging's credentials.
+        ...(config.basicAuth === null ? {} : { httpCredentials: { ...config.basicAuth, origin: new URL(config.origin).origin } }),
+        // With a Cloudflare Access token, each request to the site is fulfilled from Node (see
+        // src/access.ts). Chromium gives a fulfilled page no address space and treats it as
+        // public, so without this it refuses the page's requests to private hosts, and a page whose
+        // assets live on one is photographed without them. A service worker's requests never pass
+        // the route that carries the token, so Access would answer them with its login page.
+        ...(config.cfAccess === null
+            ? {}
+            : { launchOptions: { args: ['--disable-features=LocalNetworkAccessChecks'] }, serviceWorkers: 'block' as const }),
         screenshot: 'off',
         trace: 'off',
     },

@@ -1,12 +1,22 @@
 # Release Notes for Craft Phone Home Plugin
 
-## [1.8.4] - Unreleased
+## [1.8.4] - 2026-10-12
 
-This release fixes how the plugin finds the deployed commit on a site that keeps its Craft application in a subdirectory. The API schema stays at 1.6.0, because the `revision` object keeps its shape.
+This release fixes how the plugin finds the deployed commit on a site that keeps its Craft application in a subdirectory, keeps project config in step with the schema versions a remediation installs, and lets the verification runner reach an environment behind Cloudflare Access. The API schema stays at 1.6.0, because the report's shape is unchanged.
 
 - The plugin now looks for `.git` at Craft's root and then in each parent directory up to three levels above it. Before this, a site with Craft in `src/` and the repository above it, which is a common layout, reported no commit at all, because `.git/HEAD` was only looked for inside `src/`. The runner then fell back to the lock file fingerprint, and a deploy that moved no Composer package had the same fingerprint before and after, so the comparison's wait was satisfied at once and could capture the environment before the host had finished deploying.
 - A `.git` that is a file rather than a directory, which a worktree or a submodule checkout leaves behind, is followed to the git directory it names, as long as that directory sits within the same bound.
 - The `REVISION` file is still read at Craft's root only, and the configured `revisionFile` still cannot leave the root.
+- A remediation now keeps project config in step with the schema versions it installs. When an update raises a Craft plugin's schema version, or Craft's, the remediation rewrites the matching `schemaVersion` in the site's project config and commits it with the lock file, and the pull request lists each change. Before this, such an update migrated the database on deploy and then stopped at Craft's project config check, and every later deploy failed until the YAML was edited by hand. When the update brings a new migration that writes project config, which a version number cannot capture, the pull request still opens but leads with a warning to apply the update locally before merging.
+- The `verify-on-deploy.yml` example now mints `<commit SHA>-<GitHub run id>-<attempt>` as the run id, and recommends `<deployment SHA>-deploy-<deployment id>` for the `deployment_status` shape. A run id must begin with the deployed commit's SHA, or Phone Home records the comparison but never links it to a patch.
+- The remediation's branch name, pull request title and commit message are now documented as a contract that sites may rely on, and are pinned by tests. Their formats are unchanged.
+- The site verification runner moves to Playwright 1.63.0, in the matching `mcr.microsoft.com/playwright:v1.63.0-noble` image, and a test now fails if the image and the runner name different Playwright releases.
+- The API documentation now says that a request with no token is answered with 404 outside dev mode and 401 in dev mode, and that a wrong token is answered with 401.
+- The verification runner can reach an environment behind Cloudflare Access with a service token. Set `PHV_CF_ACCESS_CLIENT_ID` and `PHV_CF_ACCESS_CLIENT_SECRET`, or pass the new `cf_access_client_id` and `cf_access_client_secret` secrets to `site-verification.yml` or `remediate.yml`, which forwards them to both halves of the verification. The two must be set together, and a run given only one is reported inconclusive, naming the one that is missing.
+- The token is sent only to the site's own origin, for the plugin API and for each page and asset the browser loads from it. A separate API origin, the Phone Home dashboard and every third-party host never receive it. In the browser it goes to one hop at a time, so a redirect from the site to a CDN does not carry it.
+- With a token set, the site's service workers are blocked, because their requests would reach Access without it.
+- Basic auth credentials are now answered to the site's own origin only. Before, a third-party frame on a page that challenged for basic auth was handed staging's credentials.
+- The example callers show the two secrets, commented out.
 - The example callers now reference the `1.8.4` tag.
 
 ## [1.8.3] - 2026-10-07

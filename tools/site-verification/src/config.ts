@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { cfAccessHeaders } from './access';
 import { asCommit } from './deployed';
 
 /**
@@ -60,6 +61,15 @@ export interface RunConfig {
      */
     basicAuth: { username: string; password: string } | null;
     /**
+     * A Cloudflare Access service token for the site being rendered, when Access sits in front of it.
+     *
+     * Sent only to the site's own origin, as basic auth is. Access answers every other request
+     * with its login page, which the runner would photograph in place of each page.
+     */
+    cfAccess: { clientId: string; clientSecret: string } | null;
+    /** Why `cfAccess` is null although part of a token was given, or null. */
+    cfAccessError: string | null;
+    /**
      * Whether this comparison is verifying a change that should have reached the site.
      *
      * When set, a comparison against an environment reporting the same Craft and plugin versions
@@ -91,6 +101,42 @@ export interface RunConfig {
     /** How long to wait for the environment to report `expectLock`, and how often to ask. */
     deployTimeoutMs: number;
     deployIntervalMs: number;
+}
+
+/**
+ * The Cloudflare Access service token, or why half of one was given.
+ *
+ * Half a token is refused rather than ignored. A secret missing from one workflow would otherwise
+ * surface as Access's login page on every page, an inconclusive run that never names the cause.
+ * The refusal is returned rather than thrown, so the run can report it as its outcome.
+ */
+function cfAccessToken(): { token: { clientId: string; clientSecret: string } | null; error: string | null } {
+    const clientId = process.env.PHV_CF_ACCESS_CLIENT_ID?.trim() ?? '';
+    const clientSecret = process.env.PHV_CF_ACCESS_CLIENT_SECRET?.trim() ?? '';
+
+    if (clientId === '' && clientSecret === '') {
+        return { token: null, error: null };
+    }
+
+    if (clientId === '' || clientSecret === '') {
+        return {
+            token: null,
+            error: `Only ${clientId === '' ? 'PHV_CF_ACCESS_CLIENT_SECRET' : 'PHV_CF_ACCESS_CLIENT_ID'} was set. PHV_CF_ACCESS_CLIENT_ID and PHV_CF_ACCESS_CLIENT_SECRET must be set together.`,
+        };
+    }
+
+    return { token: { clientId, clientSecret }, error: null };
+}
+
+/**
+ * The headers that get a request past whatever guards the site: basic auth, a Cloudflare Access
+ * service token, or both. They belong to the site's origin and must never be sent anywhere else.
+ */
+export function siteAccessHeaders(config: Pick<RunConfig, 'basicAuth' | 'cfAccess'>): Record<string, string> {
+    return {
+        ...(config.basicAuth === null ? {} : { Authorization: `Basic ${Buffer.from(`${config.basicAuth.username}:${config.basicAuth.password}`).toString('base64')}` }),
+        ...(config.cfAccess === null ? {} : cfAccessHeaders(config.cfAccess)),
+    };
 }
 
 function required(name: string): string {
@@ -141,6 +187,7 @@ export function runConfig(): RunConfig {
     // lives in the plugin repository, which is mounted into more than one project -- so a bare run
     // id like "local" would otherwise let one site's baseline sit where another site's run expects
     // to find it, and a comparison across the two would look like an ordinary pass.
+    const cfAccess = cfAccessToken();
     const siteKey = new URL(origin).host.replace(/[^a-z0-9.-]/gi, '_');
 
     cached = {
@@ -165,6 +212,8 @@ export function runConfig(): RunConfig {
         basicAuth: process.env.PHV_BASIC_AUTH_USER
             ? { username: process.env.PHV_BASIC_AUTH_USER, password: process.env.PHV_BASIC_AUTH_PASS ?? '' }
             : null,
+        cfAccess: cfAccess.token,
+        cfAccessError: cfAccess.error,
         expectChange: process.env.PHV_EXPECT_CHANGE === '1',
         expectPackage: process.env.PHV_EXPECT_PACKAGE?.trim() || null,
         expectVersion: process.env.PHV_EXPECT_VERSION?.trim() || null,

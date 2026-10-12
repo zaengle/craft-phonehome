@@ -4,7 +4,7 @@ services:
     # the OS that renders the screenshots are the whole point of running this in a container: a
     # baseline captured here is comparable to one captured by CI on the same image, which a
     # baseline captured on a Mac is not.
-    image: mcr.microsoft.com/playwright:v1.49.1-noble
+    image: mcr.microsoft.com/playwright:v1.63.0-noble
     container_name: ddev-${DDEV_SITENAME}-playwright
     command: ["tail", "-f", "/dev/null"]
     working_dir: /var/www/html/plugins/craft-phonehome/tools/site-verification

@@ -28,7 +28,10 @@ Major/minor/patch versions will always be reflected in the plugin release versio
 - Only `GET` requests are accepted by the `/actions/phonehome/schema` endpoint.
 - Requests must include the correct Bearer token in a `x-auth-token` header.
 - Requests must accept JSON responses.
-- If the token is missing or invalid, the request will be rejected with a 401 Unauthorized error.
+- A request with no token is answered with 404 Not Found outside dev mode, so that the endpoint does not advertise itself, and with 401 Unauthorized in dev mode.
+- A request with a wrong token is answered with 401 Unauthorized in every mode.
+
+If you are checking a site from outside, a 404 without a token is the expected answer, not a sign that the API is broken. Send any token, even a wrong one: a 401 shows the endpoint is live.
 
 ### Request Options
 

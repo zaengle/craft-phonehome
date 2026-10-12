@@ -261,6 +261,19 @@ test('how far the Composer update reached is carried into the pull request body'
     expect(job('pull_request')).toContain('SCOPE_REASON: ${{ needs.prepare.outputs.scope_reason }}');
 });
 
+test('a branch whose update has to be applied locally is not deployed', () => {
+    // Its new migrations write project config only the local run produces, so a deploy would leave
+    // the environment in a state the eventual commit does not describe.
+    expect(job('deploy').match(/\n {4}if: (.*)\n/)?.[1]).toContain("&& needs.prepare.outputs.apply_locally == ''");
+});
+
+test('what the schema check could not do is carried into the pull request body', () => {
+    expect(job('prepare')).toContain('schema_unknown: ${{ steps.resolve.outputs.schema_unknown }}');
+    expect(job('prepare')).toContain('schema_error: ${{ steps.resolve.outputs.schema_error }}');
+    expect(job('pull_request')).toContain('SCHEMA_UNKNOWN: ${{ needs.prepare.outputs.schema_unknown }}');
+    expect(job('pull_request')).toContain('SCHEMA_ERROR: ${{ needs.prepare.outputs.schema_error }}');
+});
+
 test('the pull request step can link the patch even when Phone Home could not be reached', () => {
     expect(job('pull_request')).toContain('DASHBOARD_ORIGIN: ${{ inputs.dashboard_origin }}');
     expect(remediate).not.toMatch(/patch #\$/);
@@ -279,4 +292,50 @@ test('the comparison is told the commit it waits for, and says how the deploy wa
     expect(job('pull_request')).toContain('DEPLOY_CONFIRMATION: ${{ needs.verify.outputs.deploy_confirmation }}');
     // A deploy workflow that failed is still a failed deploy, whatever the environment reports.
     expect(job('verify')).toContain("needs.deploy.result == 'success'");
+});
+
+test('the Playwright image matches the Playwright the runner installs', () => {
+    // The runner launches the browser the container image ships, so the image and package.json
+    // must name the same Playwright release. Dependabot bumps package.json alone; CI never
+    // launches a browser, so only this test notices when the image is left behind.
+    const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url).pathname, 'utf8')) as { devDependencies: Record<string, string> };
+    const version = pkg.devDependencies['@playwright/test'];
+    const compose = readFileSync(new URL('../../ddev/docker-compose.playwright.yaml', import.meta.url).pathname, 'utf8');
+
+    expect(version).toMatch(/^\d+\.\d+\.\d+$/);
+
+    for (const text of [verification, compose]) {
+        const images = [...text.matchAll(/mcr\.microsoft\.com\/playwright:v([\d.]+)-/g)].map((match) => match[1]);
+
+        expect(images.length).toBeGreaterThan(0);
+        expect(new Set(images)).toEqual(new Set([version]));
+    }
+});
+
+test('the example pair mints a run id Phone Home can link, unique per run', () => {
+    // Phone Home reads the commit from the start of the run id; the GitHub run id keeps a push and a
+    // run started by hand on the same commit apart. The first onboarded site hit both problems.
+    const example = readFileSync(new URL('../../examples/verify-on-deploy.yml', import.meta.url).pathname, 'utf8');
+
+    expect(example).toContain('run_id: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}');
+    expect(example).toMatch(/run_id: \$\{\{ github\.sha \}\}-/);
+    expect(example).toContain('${{ github.event.deployment.sha }}-deploy-${{ github.event.deployment.id }}');
+    expect(example).not.toMatch(/`deploy-\$\{\{ github\.event\.deployment\.id \}\}`/);
+});
+
+test('the remediation title and commit message keep the format sites rely on', () => {
+    // Sites recognise a remediation merge from these strings and read the patch, package and version
+    // from them. A change here must be deliberate and called out as breaking, not discovered by a site.
+    expect(job('pull_request')).toContain("TITLE: 'Security: ${{ inputs.package }} to ${{ inputs.version }}'");
+    expect(job('prepare')).toContain('git commit -m "Security: $PACKAGE to $VERSION (Phone Home patch $PATCH_ID)"');
+    expect(readFileSync(new URL('../../README.md', import.meta.url).pathname, 'utf8')).toContain('`security/patch-<patch>-site-<site>`');
+});
+
+test('a Cloudflare Access service token reaches the runner in both halves of a remediation', () => {
+    for (const half of ['baseline', 'verify']) {
+        expect(job(half)).toContain('cf_access_client_id: ${{ secrets.cf_access_client_id }}');
+        expect(job(half)).toContain('cf_access_client_secret: ${{ secrets.cf_access_client_secret }}');
+    }
+    expect(verification).toContain('PHV_CF_ACCESS_CLIENT_ID: ${{ secrets.cf_access_client_id }}');
+    expect(verification).toContain('PHV_CF_ACCESS_CLIENT_SECRET: ${{ secrets.cf_access_client_secret }}');
 });

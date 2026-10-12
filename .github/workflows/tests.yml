@@ -83,6 +83,12 @@ jobs:
         working-directory: tools/site-verification
         run: npm ci
 
+      # The Cloudflare Access tests drive a real browser, because what they check is which hosts
+      # the browser sends the token to. Nothing else in the unit suite needs one.
+      - name: Install Chromium
+        working-directory: tools/site-verification
+        run: npx playwright install --with-deps chromium
+
       - name: Run the runner's unit tests
         working-directory: tools/site-verification
         run: npx playwright test -c playwright.unit.config.ts
