@@ -9,6 +9,9 @@ This release changes what a remediation commits. The plugin itself and its API a
 - The remediation's branch name, pull request title and commit message are now documented as a contract that sites may rely on, and are pinned by tests. Their formats are unchanged.
 - The site verification runner moves to Playwright 1.63.0, in the matching `mcr.microsoft.com/playwright:v1.63.0-noble` image, and a test now fails if the image and the runner name different Playwright releases.
 - The API documentation now says that a request with no token is answered with 404 outside dev mode and 401 in dev mode, and that a wrong token is answered with 401.
+- The verification runner can reach an environment behind Cloudflare Access with a service token. Set `PHV_CF_ACCESS_CLIENT_ID` and `PHV_CF_ACCESS_CLIENT_SECRET`, or pass the new `cf_access_client_id` and `cf_access_client_secret` secrets to `site-verification.yml` or `remediate.yml`, which forwards them to both halves of the verification. The two must be set together.
+- The token is sent only to the site's own origin, for the plugin API and for each page and asset the browser loads from it. A separate API origin, the Phone Home dashboard and every third-party host never receive it. In the browser it goes to one hop at a time, so a redirect from the site to a CDN does not carry it.
+- The example callers show the two secrets, commented out, and `ddev verify` reads the same two variables from the site's `.env`.
 
 ## [1.8.3] - 2026-10-07
 

@@ -150,6 +150,18 @@ and `PHV_BASIC_AUTH_PASS`. These credentials cover the browser and the plugin AP
 same origin. A separate `PHV_API_ORIGIN` receives only the Phone Home token. Without credentials a
 protected API makes the run inconclusive, and protected pages cannot be verified.
 
+If Cloudflare Access sits in front of the environment, create a service token in Cloudflare Zero
+Trust, allow it on the environment's Access application with a Service Auth policy, and set
+`PHV_CF_ACCESS_CLIENT_ID` and `PHV_CF_ACCESS_CLIENT_SECRET`. In the shared workflows they are the
+`cf_access_client_id` and `cf_access_client_secret` secrets. The two must be set together, and a run
+with only one of them stops with an error naming both. The token is sent to the site's own origin
+only, like basic auth: never to a separate `PHV_API_ORIGIN`, the Phone Home dashboard, or any other
+host a page loads from. In the browser each request to the site is sent one hop at a time, so a
+redirect to another host, such as an image transform handed off to a CDN, does not carry the token
+with it. A redirect within the site is followed on the cookie Access sets. In Access's strict
+service-token mode no cookie is set, so a page that redirects within the site is reported
+unreachable. Basic auth and a service token can be used together.
+
 ## What a remediation leaves behind
 
 Sites may rely on three strings the shared `remediate.yml` produces, to recognise a remediation
