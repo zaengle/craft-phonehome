@@ -15,12 +15,21 @@ export function cfAccessHeaders(token: { clientId: string; clientSecret: string 
  * this hop gets a same-origin redirect through. In strict service-token mode it does not, and that
  * page is reported unreachable rather than the token being sent further.
  */
-export async function continueWithAccess(route: Route, headers: Record<string, string>): Promise<void> {
+export async function continueWithAccess(
+    route: Route,
+    headers: Record<string, string>,
+    log: (message: string) => void = (message) => process.stderr.write(`${message}\n`),
+): Promise<void> {
     try {
         const response = await route.fetch({ headers: { ...route.request().headers(), ...headers }, maxRedirects: 0 });
 
         await route.fulfill({ response });
-    } catch {
-        await route.abort('failed').catch(() => undefined);
+    } catch (error) {
+        // Said, because the browser only ever sees the abort code. A missing stylesheet would
+        // otherwise surface as a screenshot difference blamed on the deploy, with no cause anywhere.
+        const message = (error as Error).message.split('\n')[0];
+
+        log(`Could not fetch ${route.request().url()} for the browser: ${message}`);
+        await route.abort(/timeout/i.test(message) ? 'timedout' : 'failed').catch(() => undefined);
     }
 }

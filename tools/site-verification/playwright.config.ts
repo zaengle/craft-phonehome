@@ -78,6 +78,14 @@ async function prepareBundle(): Promise<void> {
     rmSync(paths.abort, { force: true });
     rmSync(paths.deploy, { force: true });
 
+    // Reported like any other refusal, so it reaches the result and the dashboard, rather than
+    // thrown at config load, where a CI run dies before there is anything to report.
+    if (config.cfAccessError !== null) {
+        abort('misconfigured', [config.cfAccessError]);
+
+        return;
+    }
+
     if (config.mode === 'capture') {
         await prepareCapture();
 
@@ -327,7 +335,17 @@ export default defineConfig({
         // Applied to the site being rendered only. Without these a staging environment behind an
         // auth prompt is photographed as the prompt, and every page reports its required element
         // missing -- a `failed` that says nothing about the deploy.
-        ...(config.basicAuth === null ? {} : { httpCredentials: config.basicAuth }),
+        // Answered to the site's own origin only. Without `origin`, a third-party host on the page
+        // that challenged for basic auth would be handed staging's credentials.
+        ...(config.basicAuth === null ? {} : { httpCredentials: { ...config.basicAuth, origin: new URL(config.origin).origin } }),
+        // With a Cloudflare Access token, each request to the site is fulfilled from Node (see
+        // src/access.ts). Chromium gives a fulfilled page no address space and treats it as
+        // public, so without this it refuses the page's requests to private hosts, and a page whose
+        // assets live on one is photographed without them. A service worker's requests never pass
+        // the route that carries the token, so Access would answer them with its login page.
+        ...(config.cfAccess === null
+            ? {}
+            : { launchOptions: { args: ['--disable-features=LocalNetworkAccessChecks'] }, serviceWorkers: 'block' as const }),
         screenshot: 'off',
         trace: 'off',
     },

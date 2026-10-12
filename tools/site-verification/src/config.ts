@@ -67,6 +67,8 @@ export interface RunConfig {
      * with its login page, which the runner would photograph in place of each page.
      */
     cfAccess: { clientId: string; clientSecret: string } | null;
+    /** Why `cfAccess` is null although part of a token was given, or null. */
+    cfAccessError: string | null;
     /**
      * Whether this comparison is verifying a change that should have reached the site.
      *
@@ -102,24 +104,28 @@ export interface RunConfig {
 }
 
 /**
- * The Cloudflare Access service token, or null when neither half is set.
+ * The Cloudflare Access service token, or why half of one was given.
  *
  * Half a token is refused rather than ignored. A secret missing from one workflow would otherwise
  * surface as Access's login page on every page, an inconclusive run that never names the cause.
+ * The refusal is returned rather than thrown, so the run can report it as its outcome.
  */
-function cfAccessToken(): { clientId: string; clientSecret: string } | null {
+function cfAccessToken(): { token: { clientId: string; clientSecret: string } | null; error: string | null } {
     const clientId = process.env.PHV_CF_ACCESS_CLIENT_ID?.trim() ?? '';
     const clientSecret = process.env.PHV_CF_ACCESS_CLIENT_SECRET?.trim() ?? '';
 
     if (clientId === '' && clientSecret === '') {
-        return null;
+        return { token: null, error: null };
     }
 
     if (clientId === '' || clientSecret === '') {
-        throw new Error('PHV_CF_ACCESS_CLIENT_ID and PHV_CF_ACCESS_CLIENT_SECRET must be set together.');
+        return {
+            token: null,
+            error: `Only ${clientId === '' ? 'PHV_CF_ACCESS_CLIENT_SECRET' : 'PHV_CF_ACCESS_CLIENT_ID'} was set. PHV_CF_ACCESS_CLIENT_ID and PHV_CF_ACCESS_CLIENT_SECRET must be set together.`,
+        };
     }
 
-    return { clientId, clientSecret };
+    return { token: { clientId, clientSecret }, error: null };
 }
 
 /**
@@ -181,6 +187,7 @@ export function runConfig(): RunConfig {
     // lives in the plugin repository, which is mounted into more than one project -- so a bare run
     // id like "local" would otherwise let one site's baseline sit where another site's run expects
     // to find it, and a comparison across the two would look like an ordinary pass.
+    const cfAccess = cfAccessToken();
     const siteKey = new URL(origin).host.replace(/[^a-z0-9.-]/gi, '_');
 
     cached = {
@@ -205,7 +212,8 @@ export function runConfig(): RunConfig {
         basicAuth: process.env.PHV_BASIC_AUTH_USER
             ? { username: process.env.PHV_BASIC_AUTH_USER, password: process.env.PHV_BASIC_AUTH_PASS ?? '' }
             : null,
-        cfAccess: cfAccessToken(),
+        cfAccess: cfAccess.token,
+        cfAccessError: cfAccess.error,
         expectChange: process.env.PHV_EXPECT_CHANGE === '1',
         expectPackage: process.env.PHV_EXPECT_PACKAGE?.trim() || null,
         expectVersion: process.env.PHV_EXPECT_VERSION?.trim() || null,

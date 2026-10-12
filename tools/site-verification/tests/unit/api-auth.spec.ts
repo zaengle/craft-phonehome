@@ -1,12 +1,12 @@
 import { chromium, expect, test } from '@playwright/test';
 import { createServer, type IncomingMessage, type RequestListener, type Server } from 'node:http';
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { cfAccessHeaders, continueWithAccess } from '../../src/access';
 import { siteAccessHeaders } from '../../src/config';
-import { fetchReport, isAbort } from '../../src/manifest';
+import { bundlePaths, fetchReport, isAbort } from '../../src/manifest';
 
 test('the plugin API receives both staging basic auth and the Phone Home token', async () => {
     let received: IncomingMessage['headers'] = {};
@@ -91,7 +91,15 @@ async function loadCaptureConfig(options: { separateApi: boolean; env: Record<st
             timeout: 15_000,
         });
 
-        return { api, dashboard, unstoredCleared: !existsSync(unstored), pending: existsSync(join(bundle, 'capture.pending.json')) };
+        const abortFile = bundlePaths(bundle).abort;
+
+        return {
+            api,
+            dashboard,
+            unstoredCleared: !existsSync(unstored),
+            pending: existsSync(join(bundle, 'capture.pending.json')),
+            abort: existsSync(abortFile) ? (JSON.parse(readFileSync(abortFile, 'utf8')) as { reason: string; detail: string[] }) : null,
+        };
     } finally {
         rmSync(bundle, { recursive: true, force: true });
         await close(site.server);
@@ -157,14 +165,33 @@ test.describe('a Cloudflare Access service token', () => {
         expect(result.api[0]['cf-access-client-secret']).toBe('access-secret');
     });
 
-    test('is refused when only half of it is set', async () => {
-        const failure = await loadCaptureConfig({ separateApi: false, env: { PHV_CF_ACCESS_CLIENT_ID: 'access-id.access' } }).catch((error: { stderr?: string; stdout?: string }) => error);
+    test('is refused as the run\'s outcome when only half of it is set', async () => {
+        // Refused as an abort the result and the dashboard carry, not thrown at config load, where
+        // a CI run dies before there is anything to report.
+        const result = await loadCaptureConfig({ separateApi: false, env: { PHV_CF_ACCESS_CLIENT_ID: 'access-id.access' } });
 
-        expect(`${(failure as { stderr?: string }).stderr ?? ''}${(failure as { stdout?: string }).stdout ?? ''}`).toContain('PHV_CF_ACCESS_CLIENT_ID and PHV_CF_ACCESS_CLIENT_SECRET must be set together.');
+        expect(result.abort).toEqual({
+            reason: 'misconfigured',
+            detail: ['Only PHV_CF_ACCESS_CLIENT_ID was set. PHV_CF_ACCESS_CLIENT_ID and PHV_CF_ACCESS_CLIENT_SECRET must be set together.'],
+        });
+        expect(result.api).toHaveLength(0);
     });
 
-    test('reaches the site\'s own pages and assets in a capture run', async () => {
+    test('reaches the site\'s own pages and assets in a capture run, and nothing of the site\'s reaches a third party', async () => {
         const seen: { path: string; id: string | undefined }[] = [];
+        const elsewhere: IncomingMessage['headers'][] = [];
+        // A third-party host on loopback, which Chromium refuses to a fulfilled page unless the
+        // runner lifts that check. It challenges for basic auth, which must not be answered with
+        // staging's credentials. The iframe is what shows it: Chromium never answers a challenge
+        // for a cross-origin image, but it does for a frame.
+        const third = await listen((request, response) => {
+            elsewhere.push(request.headers);
+            if (request.headers.authorization === undefined) {
+                response.writeHead(401, { 'WWW-Authenticate': 'Basic realm="cdn"' }).end();
+                return;
+            }
+            response.writeHead(200, { 'Content-Type': 'image/svg+xml' }).end('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"/>');
+        });
         const site = await listen((request, response) => {
             const id = request.headers['cf-access-client-id'] as string | undefined;
             seen.push({ path: request.url ?? '', id });
@@ -182,7 +209,7 @@ test.describe('a Cloudflare Access service token', () => {
                 response.writeHead(200, { 'Content-Type': 'image/svg+xml' }).end('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"/>');
                 return;
             }
-            response.writeHead(200, { 'Content-Type': 'text/html' }).end('<!doctype html><h1>Home</h1><img src="/logo.svg">');
+            response.writeHead(200, { 'Content-Type': 'text/html' }).end(`<!doctype html><h1>Home</h1><img src="/logo.svg"><img src="http://127.0.0.1:${third.port}/badge.svg"><iframe src="http://127.0.0.1:${third.port}/embed"></iframe>`);
         }, 'localhost');
         const origin = `http://localhost:${site.port}`;
         const runId = `auth-browser-${process.pid}`;
@@ -196,6 +223,7 @@ test.describe('a Cloudflare Access service token', () => {
                     PHV_MODE: 'capture', PHV_RUN_ID: runId, PHV_ORIGIN: origin, PHV_API_ORIGIN: '',
                     PHV_TOKEN: 'site-token', PHV_DASHBOARD_ORIGIN: '', PHV_REPLACE: '1', PHV_STABILITY_SAMPLES: '1',
                     ...CF_ENV,
+                    ...BASIC_ENV,
                 },
                 timeout: 60_000,
             }).catch((error: { stdout: string; stderr: string }) => error);
@@ -204,9 +232,16 @@ test.describe('a Cloudflare Access service token', () => {
             expect(seen.some((request) => request.path === '/')).toBe(true);
             expect(seen.some((request) => request.path === '/logo.svg')).toBe(true);
             expect(seen.every((request) => request.id === 'access-id.access')).toBe(true);
+            expect(elsewhere).not.toHaveLength(0);
+            for (const headers of elsewhere) {
+                expect(headers['cf-access-client-id']).toBeUndefined();
+                expect(headers['cf-access-client-secret']).toBeUndefined();
+                expect(headers.authorization).toBeUndefined();
+            }
         } finally {
             rmSync(bundle, { recursive: true, force: true });
             await close(site.server);
+            await close(third.server);
         }
     });
 
@@ -258,6 +293,32 @@ test.describe('a Cloudflare Access service token', () => {
             await browser.close();
             await close(site.server);
             await close(third.server);
+        }
+    });
+
+    test('says why a request to the site could not be fetched', async () => {
+        const site = await listen((request, response) => {
+            if (request.url === '/broken.css') {
+                request.socket.destroy();
+                return;
+            }
+            response.writeHead(200, { 'Content-Type': 'text/html' }).end('<!doctype html><link rel="stylesheet" href="/broken.css"><h1>Page</h1>');
+        }, 'localhost');
+        const origin = `http://localhost:${site.port}`;
+        const logged: string[] = [];
+        const browser = await chromium.launch();
+        try {
+            const page = await browser.newPage();
+            const headers = cfAccessHeaders({ clientId: 'access-id.access', clientSecret: 'access-secret' });
+            await page.route('**/*', (route) => continueWithAccess(route, headers, (message) => logged.push(message)));
+
+            await page.goto(`${origin}/`, { waitUntil: 'load' });
+
+            expect(logged).toHaveLength(1);
+            expect(logged[0]).toContain(`Could not fetch ${origin}/broken.css for the browser: `);
+        } finally {
+            await browser.close();
+            await close(site.server);
         }
     });
 });
