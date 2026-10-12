@@ -16,6 +16,11 @@
 #   MOVED, COUNT           What Composer moved, one "name before -> after" per line, and how many.
 #   SCOPE, SCOPE_REASON    How far the update had to widen (exact, dependencies or all) and the
 #                          conflict that made it widen. Empty when this run did not resolve the change.
+#   SCHEMA_CHANGES         Schema versions brought into step in project config, one per line.
+#   APPLY_LOCALLY          New migrations that write project config, one per line. Not empty means
+#                          the update has to be applied locally before merging.
+#   SCHEMA_UNKNOWN         Moved plugins whose new schema version could not be read, one per line.
+#   SCHEMA_ERROR           Why schema versions were not checked at all, when they were not.
 #   CONTEXT                The remediation-context JSON from Phone Home, or empty if unreachable.
 #   BASELINE               The capture's outcome as the runner reported it.
 #   BASELINE_SUMMARY       One line on what the capture found.
@@ -35,7 +40,7 @@ set -euo pipefail
 : "${PATCH_ID:=?}" "${DASHBOARD_ORIGIN:=}" "${ORIGIN:=}" "${MOVED:=}" "${COUNT:=0}" "${CONTEXT:=}" "${SCOPE:=}" "${SCOPE_REASON:=}"
 : "${BASELINE:=}" "${BASELINE_SUMMARY:=}" "${DEPLOYED:=}" "${DEPLOY_JOB:=}" "${DEPLOY_RUN_URL:=}"
 : "${VERIFY_JOB:=}" "${VERIFICATION:=}" "${VERIFICATION_SUMMARY:=}" "${ENVIRONMENT:=}"
-: "${DEPLOY_CONFIRMED_BY:=}" "${DEPLOY_CONFIRMATION:=}"
+: "${DEPLOY_CONFIRMED_BY:=}" "${DEPLOY_CONFIRMATION:=}" "${SCHEMA_CHANGES:=}" "${APPLY_LOCALLY:=}" "${SCHEMA_UNKNOWN:=}" "${SCHEMA_ERROR:=}"
 
 # The patch is named as a link to its page in Phone Home, never as `#<number>`. GitHub turns a bare
 # `#90` into a link to issue or pull request 90 of whichever repository the body lands in, which
@@ -126,6 +131,16 @@ else
 > ${ORIGIN} was not deployed with this branch, so the comparison above measured the environment as it already was. It says nothing about this change."
 fi
 
+# A migration that writes project config cannot be reproduced here, and merging without applying it
+# locally first would deploy a database change the project config does not describe. Said first,
+# so nobody merges past it.
+if [ -n "$APPLY_LOCALLY" ]; then
+    echo "> [!CAUTION]"
+    echo "> **Apply this update locally before merging.** A migration in it writes project config, which this workflow cannot reproduce, so project config, schema versions included, was left alone and the branch was not deployed or compared. Run the update locally with admin changes allowed, commit the project config Craft writes to this branch, and only then merge:"
+    printf '%s\n' "$APPLY_LOCALLY" | sed 's/^/> - /'
+    echo
+fi
+
 echo "Prepared by Phone Home for ${patch_ref}."
 echo
 echo "$why"
@@ -148,6 +163,23 @@ fi
 echo
 if [ -n "$resolved" ]; then
     echo "$resolved"
+    echo
+fi
+if [ -n "$SCHEMA_ERROR" ]; then
+    echo "> [!WARNING]"
+    echo "> ${SCHEMA_ERROR} Check that project config names the schema versions this update installs before merging, or the deploy may stop on a mismatch."
+    echo
+fi
+if [ -n "$SCHEMA_UNKNOWN" ]; then
+    echo "> [!WARNING]"
+    echo "> The new schema version of these plugins could not be read from their source, so project config was not checked for them. Run the update locally and commit any project config change Craft writes:"
+    printf '%s\n' "$SCHEMA_UNKNOWN" | sed 's/^/> - /'
+    echo
+fi
+if [ -n "$SCHEMA_CHANGES" ]; then
+    echo "**Project config.** The update raises these schema versions, and project config has been brought into step in this branch so the deploy does not stop on a mismatch:"
+    echo
+    printf '%s\n' "$SCHEMA_CHANGES" | sed 's/^/- /'
     echo
 fi
 echo "$verdict"

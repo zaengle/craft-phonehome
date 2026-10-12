@@ -254,7 +254,8 @@ function fakePrGh(openUrl: string): { dir: string; calls: string } {
 echo "$*" >> '${calls}'
 case "$1 $2" in
   "pr list") echo '${openUrl}' ;;
-  "pr edit") exit 0 ;;
+  "pr edit") [ "$4" = --body-file ] && cp "$5" '${join(dir, 'edited')}'; exit 0 ;;
+  "pr view") printf '%s' "$PREVIOUS_BODY" ;;
   "pr create") echo "https://github.com/z/x/pull/26" ;;
   *) echo "unexpected gh $*" >&2; exit 64 ;;
 esac`,
@@ -264,10 +265,16 @@ esac`,
     return { dir, calls };
 }
 
-function openPr(openUrl: string) {
+/**
+ * Runs open-pr.sh with `body` as this run's body. `env` adds what the run detected, and
+ * PREVIOUS_BODY, which is what `gh pr view` answers for the open pull request.
+ */
+function openPr(openUrl: string, body = 'This run.\n', env: Record<string, string> = {}) {
     const gh = fakePrGh(openUrl);
     const outputs = join(gh.dir, 'outputs');
+    const bodyFile = join(gh.dir, 'pr-body.md');
     writeFileSync(outputs, '');
+    writeFileSync(bodyFile, body);
 
     const run = spawnSync('bash', [join(ci, 'open-pr.sh')], {
         env: {
@@ -276,12 +283,20 @@ function openPr(openUrl: string) {
             BRANCH: 'security/patch-31-site-2',
             BASE: 'main',
             TITLE: 'Security: craftcms/cms to 5.8.15',
-            BODY_FILE: '/tmp/pr-body.md',
+            BODY_FILE: bodyFile,
+            ...env,
         },
         encoding: 'utf8',
     });
+    const edited = join(gh.dir, 'edited');
 
-    return { status: run.status, stderr: run.stderr, outputs: readFileSync(outputs, 'utf8'), calls: readFileSync(gh.calls, 'utf8').trim().split('\n') };
+    return {
+        status: run.status,
+        stderr: run.stderr,
+        outputs: readFileSync(outputs, 'utf8'),
+        calls: readFileSync(gh.calls, 'utf8').trim().split('\n').map((call) => call.replace(bodyFile, 'BODY')),
+        edited: existsSync(edited) ? readFileSync(edited, 'utf8') : null,
+    };
 }
 
 test.describe('open-pr.sh', () => {
@@ -291,7 +306,7 @@ test.describe('open-pr.sh', () => {
         expect(result.status, result.stderr).toBe(0);
         expect(result.calls).toEqual([
             'pr list --head security/patch-31-site-2 --state open --json url --jq .[0].url // empty',
-            'pr create --draft --base main --head security/patch-31-site-2 --title Security: craftcms/cms to 5.8.15 --body-file /tmp/pr-body.md',
+            'pr create --draft --base main --head security/patch-31-site-2 --title Security: craftcms/cms to 5.8.15 --body-file BODY',
         ]);
         expect(result.outputs).toBe('url=https://github.com/z/x/pull/26\n');
     });
@@ -304,9 +319,28 @@ test.describe('open-pr.sh', () => {
         expect(result.status, result.stderr).toBe(0);
         expect(result.calls).toEqual([
             'pr list --head security/patch-31-site-2 --state open --json url --jq .[0].url // empty',
-            'pr edit https://github.com/z/x/pull/25 --body-file /tmp/pr-body.md',
+            'pr view https://github.com/z/x/pull/25 --json body --jq .body',
+            'pr edit https://github.com/z/x/pull/25 --body-file BODY',
         ]);
         expect(result.outputs).toBe('url=https://github.com/z/x/pull/25\n');
+        expect(result.edited).toBe('This run.\n');
+    });
+
+    const CAUTION = '> [!CAUTION]\n> **Apply this update locally before merging.** A migration in it writes project config.\n> - verbb/formie: m261001_000000_move_settings.php';
+
+    test('a re-run that skipped the migration check keeps the open pull request\'s warning at the top', () => {
+        const result = openPr('https://github.com/z/x/pull/25', 'This run.\n', { PREVIOUS_BODY: `${CAUTION}\n\nThe first run.\n` });
+
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.edited).toBe(`${CAUTION}\n\nThis run.\n`);
+    });
+
+    test('a run that moved packages did the migration check, so its body stands as written', () => {
+        const result = openPr('https://github.com/z/x/pull/25', 'This run.\n', { MOVED: 'verbb/formie 3.1.43 -> 3.1.46', PREVIOUS_BODY: `${CAUTION}\n\nThe first run.\n` });
+
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.calls.some((call) => call.startsWith('pr view'))).toBe(false);
+        expect(result.edited).toBe('This run.\n');
     });
 });
 
@@ -527,7 +561,7 @@ test.describe('summarise.mjs', () => {
 
 /** How the stand-in `composer` answers each of the three update steps the script may try. */
 type Step = 'exact' | 'dependencies' | 'all';
-type Answers = Partial<Record<Step, number>>;
+type Answers = Partial<Record<Step | 'install', number>>;
 
 const CONFLICT = `Your requirements could not be resolved to an installable set of packages.
 
@@ -541,7 +575,7 @@ const CONFLICT = `Your requirements could not be resolved to an installable set 
  * every call, and answers each update step with the exit status the test gives it: 0 moves
  * Formie in the lock file it finds where it is run, as the real one would, and 2 prints a
  * dependency conflict after scribbling on the lock file, which the script must undo before its
- * next attempt.
+ * next attempt. `install` is the exit status of installing the site as it was, before the update.
  */
 function siteInSubdirectory(answers: Answers = {}): { root: string; app: string; bin: string; calls: string } {
     // Resolved, because the temporary directory is reached through a symlink on macOS and the
@@ -561,6 +595,8 @@ function siteInSubdirectory(answers: Answers = {}): { root: string; app: string;
     writeFileSync(
         join(bin, 'composer'),
         `#!/usr/bin/env bash
+# Installing the site as it is, before the update, changes nothing here and is not an update step.
+[ "$1" = install ] && exit ${answers.install ?? 0}
 echo "$* in $(pwd)" >> '${calls}'
 case "$*" in
   *--with-all-dependencies*) code=${answers.all ?? 0} ;;
@@ -608,7 +644,12 @@ test.describe('resolve-change.sh', () => {
 
         expect(result.status, result.stderr).toBe(0);
         expect(result.calls).toEqual([`update verbb/formie:3.1.43 --no-interaction --no-scripts in ${site.app}`]);
-        expect(result.outputs).toBe('count=1\nscope=exact\nscope_reason=\nmoved<<MOVED\nverbb/formie 3.1.42 -> 3.1.43\nMOVED\n');
+        expect(result.outputs).toBe(
+            'count=1\nscope=exact\nscope_reason=\n' +
+                'schema_changes<<SCHEMA\nSCHEMA\napply_locally<<SCHEMA\nSCHEMA\nschema_unknown<<SCHEMA\nSCHEMA\nproject_config_files=\n' +
+                'schema_error=\n' +
+                'moved<<MOVED\nverbb/formie 3.1.42 -> 3.1.43\nMOVED\n',
+        );
         // Nothing is written at the repository root, and the working files are cleaned up.
         expect(existsSync(join(site.root, 'composer.lock'))).toBe(false);
         expect(existsSync(join(site.app, 'composer.lock.before'))).toBe(false);
@@ -662,6 +703,17 @@ test.describe('resolve-change.sh', () => {
         expect(result.calls).toHaveLength(1);
         expect(result.stdout).toContain('which is not a dependency conflict, so no broader update was tried');
         expect(result.stderr).toContain('required authentication');
+    });
+
+    test('a site that cannot be installed as it was still gets its update, with the schema check said to be skipped', () => {
+        const site = siteInSubdirectory({ install: 1 });
+        const result = resolveChange(site.app, site);
+
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.outputs).toContain('moved<<MOVED\nverbb/formie 3.1.42 -> 3.1.43\nMOVED\n');
+        expect(result.outputs).toContain('schema_error=The site could not be installed as it was before the update, so schema versions and new migrations were not checked.\n');
+        expect(result.outputs).toContain('schema_changes<<SCHEMA\nSCHEMA\napply_locally<<SCHEMA\nSCHEMA\nschema_unknown<<SCHEMA\nSCHEMA\nproject_config_files=\n');
+        expect(result.stdout).toContain('::warning::The site could not be installed as it was before the update');
     });
 
     test('run from a root with no Composer files, it names working_directory rather than inventing a lock file', () => {

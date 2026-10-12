@@ -217,6 +217,11 @@ jobs:
       count: ${{ steps.resolve.outputs.count }}
       scope: ${{ steps.resolve.outputs.scope }}
       scope_reason: ${{ steps.resolve.outputs.scope_reason }}
+      schema_changes: ${{ steps.resolve.outputs.schema_changes }}
+      apply_locally: ${{ steps.resolve.outputs.apply_locally }}
+      project_config_files: ${{ steps.resolve.outputs.project_config_files }}
+      schema_unknown: ${{ steps.resolve.outputs.schema_unknown }}
+      schema_error: ${{ steps.resolve.outputs.schema_error }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -250,6 +255,7 @@ jobs:
       - name: Push the branch
         working-directory: ${{ inputs.working_directory }}
         env:
+          PROJECT_CONFIG_FILES: ${{ steps.resolve.outputs.project_config_files }}
           BRANCH: ${{ inputs.branch }}
           PACKAGE: ${{ inputs.package }}
           VERSION: ${{ inputs.version }}
@@ -257,9 +263,16 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # The project config files resolve-change.sh brought into step with the new schema
+          # versions are committed with the lock, so a deploy does not stop on a mismatch.
           git add composer.lock composer.json
+          if [ -n "$PROJECT_CONFIG_FILES" ]; then
+            # shellcheck disable=SC2086
+            git add -- $PROJECT_CONFIG_FILES
+          fi
           # "patch 90", not "patch #90": GitHub links a bare #90 in a commit message to this
           # repository's own issue or pull request 90, which is not Phone Home's patch.
+          # A contract sites rely on; see "What a remediation leaves behind" in tools/site-verification/README.md.
           git commit -m "Security: $PACKAGE to $VERSION (Phone Home patch $PATCH_ID)"
           git push --set-upstream origin "$BRANCH"
 
@@ -273,7 +286,10 @@ jobs:
   # succeeded, so the pull request can say whether the comparison rendered this change at all.
   deploy:
     needs: [check, prepare, baseline]
-    if: always() && needs.check.outputs.has_pr == '0' && needs.baseline.result == 'success' && needs.baseline.outputs.overall == 'passed' && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
+    # A branch whose update has to be applied locally is not deployed: its new migrations write
+    # project config that only the local run produces, and deploying it would leave the environment
+    # in a state the eventual commit does not describe.
+    if: always() && needs.check.outputs.has_pr == '0' && needs.baseline.result == 'success' && needs.baseline.outputs.overall == 'passed' && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped') && needs.prepare.outputs.apply_locally == ''
     runs-on: ubuntu-latest
     outputs:
       deployed: ${{ steps.deploy.outputs.deployed }}
@@ -401,6 +417,10 @@ jobs:
           COUNT: ${{ needs.prepare.outputs.count }}
           SCOPE: ${{ needs.prepare.outputs.scope }}
           SCOPE_REASON: ${{ needs.prepare.outputs.scope_reason }}
+          SCHEMA_CHANGES: ${{ needs.prepare.outputs.schema_changes }}
+          APPLY_LOCALLY: ${{ needs.prepare.outputs.apply_locally }}
+          SCHEMA_UNKNOWN: ${{ needs.prepare.outputs.schema_unknown }}
+          SCHEMA_ERROR: ${{ needs.prepare.outputs.schema_error }}
           BASELINE: ${{ needs.baseline.outputs.overall }}
           BASELINE_SUMMARY: ${{ needs.baseline.outputs.summary }}
           DEPLOYED: ${{ needs.deploy.outputs.deployed }}
@@ -414,6 +434,7 @@ jobs:
           DEPLOY_CONFIRMATION: ${{ needs.verify.outputs.deploy_confirmation }}
           BRANCH: ${{ inputs.branch }}
           BASE: ${{ github.ref_name }}
+          # A contract sites rely on; see "What a remediation leaves behind" in tools/site-verification/README.md.
           TITLE: 'Security: ${{ inputs.package }} to ${{ inputs.version }}'
           BODY_FILE: /tmp/pr-body.md
         run: |
