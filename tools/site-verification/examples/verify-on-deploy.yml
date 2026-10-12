@@ -20,6 +20,9 @@
 #   * Secrets STAGING_BASIC_AUTH_USER / _PASSWORD — only if the environment sits behind an auth
 #     prompt, which staging commonly does. Without them the runner photographs the prompt and
 #     reports a missing required element on every page.
+#   * Secrets CF_ACCESS_CLIENT_ID / _SECRET — only if Cloudflare Access sits in front of the
+#     environment. Create a service token in Cloudflare Zero Trust and allow it with a Service Auth
+#     policy. Without it the runner photographs Access's login page instead of each page.
 #   * The site's plugin configured with a `verification` block, and reporting api_version 1.5.0 or
 #     later. A site that has not opted in is reported as disabled, not as an empty passing suite.
 #
@@ -97,6 +100,8 @@ jobs:
     secrets:
       basic_auth_user: ${{ secrets.STAGING_BASIC_AUTH_USER }}
       basic_auth_password: ${{ secrets.STAGING_BASIC_AUTH_PASSWORD }}
+      # cf_access_client_id: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      # cf_access_client_secret: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
 
   deploy:
     needs: baseline
@@ -120,3 +125,5 @@ jobs:
     secrets:
       basic_auth_user: ${{ secrets.STAGING_BASIC_AUTH_USER }}
       basic_auth_password: ${{ secrets.STAGING_BASIC_AUTH_PASSWORD }}
+      # cf_access_client_id: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      # cf_access_client_secret: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}

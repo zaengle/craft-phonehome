@@ -330,3 +330,12 @@ test('the remediation title and commit message keep the format sites rely on', (
     expect(job('prepare')).toContain('git commit -m "Security: $PACKAGE to $VERSION (Phone Home patch $PATCH_ID)"');
     expect(readFileSync(new URL('../../README.md', import.meta.url).pathname, 'utf8')).toContain('`security/patch-<patch>-site-<site>`');
 });
+
+test('a Cloudflare Access service token reaches the runner in both halves of a remediation', () => {
+    for (const half of ['baseline', 'verify']) {
+        expect(job(half)).toContain('cf_access_client_id: ${{ secrets.cf_access_client_id }}');
+        expect(job(half)).toContain('cf_access_client_secret: ${{ secrets.cf_access_client_secret }}');
+    }
+    expect(verification).toContain('PHV_CF_ACCESS_CLIENT_ID: ${{ secrets.cf_access_client_id }}');
+    expect(verification).toContain('PHV_CF_ACCESS_CLIENT_SECRET: ${{ secrets.cf_access_client_secret }}');
+});

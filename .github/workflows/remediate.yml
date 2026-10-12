@@ -86,6 +86,10 @@ on:
         required: false
       basic_auth_user: { required: false }
       basic_auth_password: { required: false }
+      cf_access_client_id:
+        description: 'Client ID of a Cloudflare Access service token, if Access sits in front of verify_origin.'
+        required: false
+      cf_access_client_secret: { required: false }
 
 permissions:
   contents: write
@@ -207,6 +211,8 @@ jobs:
       phonehome_token: ${{ secrets.phonehome_token }}
       basic_auth_user: ${{ secrets.basic_auth_user }}
       basic_auth_password: ${{ secrets.basic_auth_password }}
+      cf_access_client_id: ${{ secrets.cf_access_client_id }}
+      cf_access_client_secret: ${{ secrets.cf_access_client_secret }}
 
   prepare:
     needs: check
@@ -338,6 +344,8 @@ jobs:
       phonehome_token: ${{ secrets.phonehome_token }}
       basic_auth_user: ${{ secrets.basic_auth_user }}
       basic_auth_password: ${{ secrets.basic_auth_password }}
+      cf_access_client_id: ${{ secrets.cf_access_client_id }}
+      cf_access_client_secret: ${{ secrets.cf_access_client_secret }}
 
   # A pushed branch always gets its pull request, whatever the verification concluded. That is the
   # result worth seeing, and a failure nobody can find is worse than one attached to a draft.
