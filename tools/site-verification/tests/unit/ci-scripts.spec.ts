@@ -1,8 +1,10 @@
 import { expect, test } from '@playwright/test';
-import { spawnSync } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createServer } from 'node:http';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 
 /**
  * The two scripts the workflows run to say what happened. They compose the sentences a reviewer
@@ -367,6 +369,67 @@ test.describe('site-token.sh', () => {
         expect(result.status).toBe(1);
         expect(result.stderr).toContain("id-token: write");
     });
+
+    test('with --json, a token the repository holds is answered alone, with no Access pair to offer', () => {
+        const result = spawnSync('bash', [join(ci, 'site-token.sh'), '--json'], { env: { PATH: process.env.PATH ?? '', PHV_TOKEN: 'secret-from-repo' }, encoding: 'utf8' });
+
+        expect(result.status).toBe(0);
+        expect(JSON.parse(result.stdout)).toEqual({ token: 'secret-from-repo' });
+    });
+
+    /**
+     * The exchange, against a stand-in for both GitHub's identity endpoint and Phone Home. The
+     * Cloudflare Access pair rides along with the token in `--json` mode, and the plain mode still
+     * prints the token alone, because remediate.yml reads it that way for the pull request callback.
+     */
+    for (const format of ['--json', 'token'] as const) {
+        test(`the exchange ${format === '--json' ? 'answers the token with the Access pair the site holds' : 'still prints the token alone'}`, async () => {
+            const server = createServer((request, response) => {
+                if (request.url?.startsWith('/idtoken')) {
+                    response.setHeader('Content-Type', 'application/json');
+                    response.end(JSON.stringify({ value: 'signed-identity' }));
+                    return;
+                }
+                if (request.url === '/api/site-tokens' && request.headers.authorization === 'Bearer signed-identity') {
+                    response.setHeader('Content-Type', 'application/json');
+                    response.end(JSON.stringify({
+                        token: 'token-from-phone-home',
+                        site: { id: 3, name: 'Staging', url: 'https://staging.example' },
+                        cloudflare_access: { client_id: 'access-id.access', client_secret: 'access-secret' },
+                    }));
+                    return;
+                }
+                response.writeHead(404).end();
+            });
+            await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+            const address = server.address();
+            if (address === null || typeof address === 'string') throw new Error('No server address');
+            const origin = `http://127.0.0.1:${address.port}`;
+            try {
+                const result = await promisify(execFile)('bash', [join(ci, 'site-token.sh'), ...(format === '--json' ? ['--json'] : [])], {
+                    env: {
+                        PATH: process.env.PATH ?? '',
+                        PHV_DASHBOARD_ORIGIN: origin,
+                        PHV_ORIGIN: 'https://staging.example',
+                        ACTIONS_ID_TOKEN_REQUEST_URL: `${origin}/idtoken?api-version=2`,
+                        ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'request-token',
+                    },
+                    encoding: 'utf8',
+                });
+
+                if (format === '--json') {
+                    expect(JSON.parse(result.stdout)).toMatchObject({
+                        token: 'token-from-phone-home',
+                        cloudflare_access: { client_id: 'access-id.access', client_secret: 'access-secret' },
+                    });
+                } else {
+                    expect(result.stdout).toBe('token-from-phone-home');
+                }
+            } finally {
+                await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+            }
+        });
+    }
 });
 
 /**

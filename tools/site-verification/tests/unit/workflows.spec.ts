@@ -208,7 +208,7 @@ test('the example callers pin the shared workflows to one release tag, never a b
     const refs = examples.flatMap((text) => [...text.matchAll(/uses: zaengle\/craft-phonehome\/\.github\/workflows\/[a-z-]+\.yml@(\S+)/g)].map((match) => match[1]));
 
     expect(refs).toHaveLength(3);
-    expect(new Set(refs)).toEqual(new Set(['1.8.3']));
+    expect(new Set(refs)).toEqual(new Set(['1.8.4']));
 });
 
 test('every step that touches composer.json or composer.lock runs inside working_directory', () => {
@@ -336,6 +336,20 @@ test('a Cloudflare Access service token reaches the runner in both halves of a r
         expect(job(half)).toContain('cf_access_client_id: ${{ secrets.cf_access_client_id }}');
         expect(job(half)).toContain('cf_access_client_secret: ${{ secrets.cf_access_client_secret }}');
     }
-    expect(verification).toContain('PHV_CF_ACCESS_CLIENT_ID: ${{ secrets.cf_access_client_id }}');
-    expect(verification).toContain('PHV_CF_ACCESS_CLIENT_SECRET: ${{ secrets.cf_access_client_secret }}');
+    expect(verification).toContain('PHV_CF_ACCESS_CLIENT_ID: ${{ secrets.cf_access_client_id || env.PHV_CF_ACCESS_CLIENT_ID }}');
+    expect(verification).toContain('PHV_CF_ACCESS_CLIENT_SECRET: ${{ secrets.cf_access_client_secret || env.PHV_CF_ACCESS_CLIENT_SECRET }}');
+});
+
+test('the Access pair Phone Home hands a run with the site token is masked before it is published', () => {
+    // A site behind Access keeps its service token in Phone Home, which answers the token exchange
+    // with it. The step reads the whole answer, and every value it publishes is masked first, so
+    // neither the token nor the pair can appear in a log.
+    const step = verification.slice(verification.indexOf('- name: Obtain the site token'), verification.indexOf('- name: ${{ inputs.mode'));
+
+    expect(step).toContain('site-token.sh --json');
+    expect(step).toContain('console.log("::add-mask::" + value)');
+    expect(step).toContain('publish("PHV_TOKEN", answer.token)');
+    expect(step).toContain('publish("PHV_CF_ACCESS_CLIENT_ID", access.client_id)');
+    expect(step).toContain('publish("PHV_CF_ACCESS_CLIENT_SECRET", access.client_secret)');
+    expect(step).toContain('if (access.client_id && access.client_secret)');
 });

@@ -10,8 +10,9 @@
 #     this repository and Phone Home hands it the linked site's token.
 #   * Secret COMPOSER_AUTH — only if the site resolves commercial Craft plugins.
 #   * Secrets STAGING_BASIC_AUTH_USER / _PASSWORD — only if staging sits behind an auth prompt.
-#   * Secrets CF_ACCESS_CLIENT_ID / _SECRET — only if Cloudflare Access sits in front of staging.
-#     Create a service token in Cloudflare Zero Trust and allow it with a Service Auth policy.
+#   * Secrets CF_ACCESS_CLIENT_ID / _SECRET — only if Cloudflare Access sits in front of staging
+#     and the token is not kept on the site in Phone Home, which hands it to the run with the site
+#     token. Create a service token in Cloudflare Zero Trust and allow it with a Service Auth policy.
 #   * A workflow_dispatch workflow that deploys a ref to staging (see deploy-staging.yml), named in
 #     Phone Home as this site's deploy workflow. Without one Phone Home refuses to dispatch at all.
 #   * The Phone Home GitHub App installed on this repository with `actions: write`.
@@ -52,7 +53,7 @@ jobs:
     # A release tag, never a branch: the runner follows this file's commit, so this is the one thing
     # to pin. 1.8.1 is the earliest tag this file works with, because it is the first to accept
     # `working_directory`; move to a later one by changing this line.
-    uses: zaengle/craft-phonehome/.github/workflows/remediate.yml@1.8.3
+    uses: zaengle/craft-phonehome/.github/workflows/remediate.yml@1.8.4
     with:
       patch_id: ${{ inputs.patch_id }}
       site_id: ${{ inputs.site_id }}

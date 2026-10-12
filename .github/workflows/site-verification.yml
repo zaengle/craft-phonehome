@@ -219,6 +219,11 @@ jobs:
 
       # The secret when the repository holds one; otherwise the run proves who it is and Phone Home
       # hands over the linked site's token. Masked so it cannot appear in a log either way.
+      #
+      # Phone Home answers with the site's Cloudflare Access service token as well, when the site
+      # holds one, so a site behind Access needs no copy of it in this repository. It is masked and
+      # published the same way. A pair the repository holds as secrets wins over it in the next
+      # step, as the repository's own site token does here.
       - name: Obtain the site token
         working-directory: runner/tools/site-verification
         env:
@@ -226,9 +231,23 @@ jobs:
           PHV_DASHBOARD_ORIGIN: ${{ inputs.dashboard_origin }}
           PHV_ORIGIN: ${{ inputs.origin }}
         run: |
-          token="$(bash ci/site-token.sh)"
-          echo "::add-mask::${token}"
-          echo "PHV_TOKEN=${token}" >> "$GITHUB_ENV"
+          bash ci/site-token.sh --json | node -e '
+            let body = "";
+            process.stdin.on("data", (chunk) => body += chunk).on("end", () => {
+              const answer = JSON.parse(body);
+              const publish = (name, value) => {
+                console.log("::add-mask::" + value);
+                require("fs").appendFileSync(process.env.GITHUB_ENV, name + "<<PHV_EOF\n" + value + "\nPHV_EOF\n");
+              };
+              publish("PHV_TOKEN", answer.token);
+              const access = answer.cloudflare_access || {};
+              if (access.client_id && access.client_secret) {
+                publish("PHV_CF_ACCESS_CLIENT_ID", access.client_id);
+                publish("PHV_CF_ACCESS_CLIENT_SECRET", access.client_secret);
+                console.log("Phone Home handed this run the Cloudflare Access service token the site holds.");
+              }
+            });
+          '
 
       - name: ${{ inputs.mode == 'capture' && 'Freeze a baseline' || 'Compare against the baseline' }}
         working-directory: runner/tools/site-verification
@@ -251,8 +270,10 @@ jobs:
           PHV_DEPLOY_TIMEOUT: ${{ inputs.deploy_timeout }}
           PHV_BASIC_AUTH_USER: ${{ secrets.basic_auth_user }}
           PHV_BASIC_AUTH_PASS: ${{ secrets.basic_auth_password }}
-          PHV_CF_ACCESS_CLIENT_ID: ${{ secrets.cf_access_client_id }}
-          PHV_CF_ACCESS_CLIENT_SECRET: ${{ secrets.cf_access_client_secret }}
+          # The repository's own secrets when it holds them, else the pair Phone Home handed the
+          # run with the site token, else nothing.
+          PHV_CF_ACCESS_CLIENT_ID: ${{ secrets.cf_access_client_id || env.PHV_CF_ACCESS_CLIENT_ID }}
+          PHV_CF_ACCESS_CLIENT_SECRET: ${{ secrets.cf_access_client_secret || env.PHV_CF_ACCESS_CLIENT_SECRET }}
         run: |
           case "$PHV_MODE" in capture|compare) ;; *) echo 'Invalid verification mode' >&2; exit 1 ;; esac
           npm run --silent "$PHV_MODE"
