@@ -1,6 +1,7 @@
 import { expect, test, type Page, type Response } from '@playwright/test';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { cfAccessHeaders, continueWithAccess } from '../src/access';
 import { runConfig } from '../src/config';
 import { bundlePaths, readFrozenManifest, type Abort } from '../src/manifest';
 
@@ -117,6 +118,14 @@ function firstDifference(texts: string[]): string {
 const EXPECTED_ORIGIN = new URL(config.origin).origin;
 
 /**
+ * The Cloudflare Access service token, as headers, or null when the site is not behind Access.
+ *
+ * Not set as `extraHTTPHeaders`, which Playwright sends with every request the page makes, so a
+ * site's fonts, analytics and third-party scripts would each receive the token.
+ */
+const CF_ACCESS = config.cfAccess === null ? null : cfAccessHeaders(config.cfAccess);
+
+/**
  * Navigates to a manifest path and refuses to verify anything that is not on the configured origin.
  *
  * The plugin already rejects a path that points off-site, but that check happens before any request
@@ -139,6 +148,10 @@ async function visit(browserPage: Page, path: string): Promise<Response> {
             blocked = request.url();
 
             return route.abort('blockedbyclient');
+        }
+
+        if (CF_ACCESS !== null && new URL(request.url()).origin === EXPECTED_ORIGIN) {
+            return continueWithAccess(route, CF_ACCESS);
         }
 
         return route.continue();
