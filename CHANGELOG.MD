@@ -1,5 +1,13 @@
 # Release Notes for Craft Phone Home Plugin
 
+## [1.8.5] - 2026-10-14
+
+This release lets a site keep its Cloudflare Access service token in Phone Home rather than in its repository, and lets the runner reach a plugin API that Cloudflare would otherwise challenge. The plugin itself and its API are unchanged, so the API schema stays at 1.6.0.
+
+- A run that proves its identity to Phone Home is now handed the site's Cloudflare Access service token with the site token, when the site holds one. `ci/site-token.sh --json` prints Phone Home's whole answer, and the shared verification workflow reads the pair from it, masks both values, and sets `PHV_CF_ACCESS_CLIENT_ID` and `PHV_CF_ACCESS_CLIENT_SECRET` from them. A repository that passes the `cf_access_client_id` and `cf_access_client_secret` secrets keeps using those, as its own `phonehome_token` wins over the exchange. Without `--json` the script prints the token alone, as before.
+- The verification runner now sends `User-Agent: phone-home-site-verification/<release>` on every request its own code makes: to the plugin API, including the deploy wait, and to the Phone Home dashboard for baselines and screenshots. Cloudflare challenges a request with no User-Agent from a datacenter address with a check that a zone's WAF rules cannot skip, so on a site behind Cloudflare every run ended inconclusive with the plugin API answering 403. The browser's requests, and the `curl` calls in the shared workflows, already carried one.
+- The example callers now reference the `1.8.5` tag.
+
 ## [1.8.4] - 2026-10-12
 
 This release fixes how the plugin finds the deployed commit on a site that keeps its Craft application in a subdirectory, keeps project config in step with the schema versions a remediation installs, and lets the verification runner reach an environment behind Cloudflare Access. The API schema stays at 1.6.0, because the report's shape is unchanged.

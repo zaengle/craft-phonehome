@@ -163,6 +163,13 @@ service-token mode no cookie is set, so a page that redirects within the site is
 unreachable. With a token set, the site's service workers are blocked, because their requests
 would reach Access without it. Basic auth and a service token can be used together.
 
+A site that is linked in Phone Home can keep the service token there instead, on the site's edit
+page, next to its basic auth credentials. Phone Home then answers `ci/site-token.sh --json` with
+the pair under `cloudflare_access` alongside the site token, and the shared workflow masks both
+values and sets the two variables from them. The repository holds no copy. When the repository
+does pass the `cf_access_client_id` and `cf_access_client_secret` secrets, they win, as its own
+`phonehome_token` wins over the exchange.
+
 ## What a remediation leaves behind
 
 Sites may rely on three strings the shared `remediate.yml` produces, to recognise a remediation

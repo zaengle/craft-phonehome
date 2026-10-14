@@ -3,10 +3,11 @@ import { createServer, type IncomingMessage, type RequestListener, type Server }
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 import { cfAccessHeaders, continueWithAccess } from '../../src/access';
 import { siteAccessHeaders } from '../../src/config';
-import { bundlePaths, fetchReport, isAbort } from '../../src/manifest';
+import { bundlePaths, fetchReport, isAbort, postArtifact, USER_AGENT } from '../../src/manifest';
 
 test('the plugin API receives both staging basic auth and the Phone Home token', async () => {
     let received: IncomingMessage['headers'] = {};
@@ -29,8 +30,39 @@ test('the plugin API receives both staging basic auth and the Phone Home token',
         const report = await fetchReport(`http://127.0.0.1:${address.port}`, 'site-token', false, siteAccessHeaders({ basicAuth: { username: 'staging', password: 'password' }, cfAccess: null }));
         expect(isAbort(report)).toBe(false);
         expect(received['x-auth-token']).toBe('site-token');
+        expect(received['user-agent']).toBe(USER_AGENT);
     } finally {
         await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+});
+
+test('the runner names itself and its release in the User-Agent of the requests it makes', () => {
+    const version = JSON.parse(readFileSync(new URL('../../../../package.json', import.meta.url), 'utf8')).version;
+
+    // Cloudflare challenges a request without one from a datacenter address, which no WAF rule skips.
+    expect(USER_AGENT).toBe(`phone-home-site-verification/${version}`);
+});
+
+test('a screenshot posted to the dashboard carries the runner\'s User-Agent', async () => {
+    let received: IncomingMessage['headers'] = {};
+    const dashboard = createServer((request, response) => {
+        received = request.headers;
+        request.resume();
+        request.on('end', () => response.writeHead(201, { 'Content-Type': 'application/json' }).end('{}'));
+    });
+    await new Promise<void>((resolve) => dashboard.listen(0, '127.0.0.1', resolve));
+    const file = join(tmpdir(), `phv-artifact-${process.pid}.png`);
+    writeFileSync(file, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    try {
+        const address = dashboard.address();
+        if (address === null || typeof address === 'string') throw new Error('No server address');
+        const posted = await postArtifact(`http://127.0.0.1:${address.port}`, 1, 'site-token', { page: 'home', variant: 'actual', file }, false);
+        expect(posted.status).toBe(201);
+        expect(received['user-agent']).toBe(USER_AGENT);
+        expect(received['x-auth-token']).toBe('site-token');
+    } finally {
+        rmSync(file, { force: true });
+        await new Promise<void>((resolve, reject) => dashboard.close((error) => error ? reject(error) : resolve()));
     }
 });
 
@@ -116,6 +148,7 @@ for (const separateApi of [false, true]) {
 
         expect(result.api).toHaveLength(1);
         expect(result.api[0]['x-auth-token']).toBe('site-token');
+        expect(result.api[0]['user-agent']).toBe(USER_AGENT);
         expect(result.api[0].authorization).toBe(separateApi ? undefined : BASIC);
         expect(result.unstoredCleared).toBe(true);
         expect(result.pending).toBe(true);
@@ -151,6 +184,7 @@ test.describe('a Cloudflare Access service token', () => {
 
         expect(result.dashboard).not.toHaveLength(0);
         for (const headers of result.dashboard) {
+            expect(headers['user-agent']).toBe(USER_AGENT);
             expect(headers['cf-access-client-id']).toBeUndefined();
             expect(headers['cf-access-client-secret']).toBeUndefined();
             expect(headers.authorization).not.toBe(BASIC);
