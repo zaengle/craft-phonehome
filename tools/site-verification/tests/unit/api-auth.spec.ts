@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { cfAccessHeaders, continueWithAccess } from '../../src/access';
 import { siteAccessHeaders } from '../../src/config';
-import { bundlePaths, fetchReport, isAbort } from '../../src/manifest';
+import { bundlePaths, fetchReport, isAbort, USER_AGENT } from '../../src/manifest';
 
 test('the plugin API receives both staging basic auth and the Phone Home token', async () => {
     let received: IncomingMessage['headers'] = {};
@@ -29,9 +29,17 @@ test('the plugin API receives both staging basic auth and the Phone Home token',
         const report = await fetchReport(`http://127.0.0.1:${address.port}`, 'site-token', false, siteAccessHeaders({ basicAuth: { username: 'staging', password: 'password' }, cfAccess: null }));
         expect(isAbort(report)).toBe(false);
         expect(received['x-auth-token']).toBe('site-token');
+        expect(received['user-agent']).toBe(USER_AGENT);
     } finally {
         await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }
+});
+
+test('the runner names itself and its release in the User-Agent of the requests it makes', () => {
+    const version = JSON.parse(readFileSync(new URL('../../../../package.json', import.meta.url), 'utf8')).version;
+
+    // Cloudflare challenges a request without one from a datacenter address, which no WAF rule skips.
+    expect(USER_AGENT).toBe(`phone-home-site-verification/${version}`);
 });
 
 const runner = new URL('../../', import.meta.url).pathname;
@@ -116,6 +124,7 @@ for (const separateApi of [false, true]) {
 
         expect(result.api).toHaveLength(1);
         expect(result.api[0]['x-auth-token']).toBe('site-token');
+        expect(result.api[0]['user-agent']).toBe(USER_AGENT);
         expect(result.api[0].authorization).toBe(separateApi ? undefined : BASIC);
         expect(result.unstoredCleared).toBe(true);
         expect(result.pending).toBe(true);
@@ -151,6 +160,7 @@ test.describe('a Cloudflare Access service token', () => {
 
         expect(result.dashboard).not.toHaveLength(0);
         for (const headers of result.dashboard) {
+            expect(headers['user-agent']).toBe(USER_AGENT);
             expect(headers['cf-access-client-id']).toBeUndefined();
             expect(headers['cf-access-client-secret']).toBeUndefined();
             expect(headers.authorization).not.toBe(BASIC);

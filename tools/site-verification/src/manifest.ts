@@ -30,6 +30,28 @@ export interface Manifest {
     warnings?: string[];
 }
 
+/**
+ * The plugin release this runner shipped with, read from the repository's own package.json, which
+ * the release process bumps. The whole repository is checked out wherever the runner runs, in CI
+ * and under `ddev verify` alike. 'unknown' when it cannot be read, rather than a guess.
+ */
+export function runnerVersion(): string {
+    try {
+        const pkg = createRequire(import.meta.url)('../../../package.json') as { name?: unknown; version?: unknown };
+
+        return pkg.name === 'phonehome' && typeof pkg.version === 'string' ? pkg.version : 'unknown';
+    } catch {
+        return 'unknown';
+    }
+}
+
+/**
+ * Sent on every request the runner makes itself; the browser sends its own. Cloudflare challenges a
+ * request with no User-Agent from a datacenter address, and a zone's WAF rules cannot skip that, so
+ * without it the plugin API behind Cloudflare answers 403 to every run.
+ */
+export const USER_AGENT = `phone-home-site-verification/${runnerVersion()}`;
+
 /** The manifest contract version this runner understands. */
 export const SUPPORTED_SCHEMA_VERSION = 1;
 
@@ -77,8 +99,10 @@ function postJson(url: string, token: string, insecureTls: boolean, body = '{}',
                 method: 'POST',
                 timeout: 15_000,
                 rejectUnauthorized: !insecureTls,
+                // After the site's headers, so nothing a site configures can drop it.
                 headers: {
                     ...siteHeaders,
+                    'User-Agent': USER_AGENT,
                     'X-Auth-Token': token,
                     Accept: 'application/json',
                     'Content-Type': 'application/json',
@@ -170,6 +194,7 @@ function dashboardRequest(
                 timeout: 30_000,
                 rejectUnauthorized: !insecureTls,
                 headers: {
+                    'User-Agent': USER_AGENT,
                     'X-Auth-Token': token,
                     Accept: 'application/json',
                     ...(body === undefined ? {} : { 'Content-Length': Buffer.byteLength(body) }),
@@ -412,6 +437,7 @@ export function postArtifact(
                 timeout: 30_000,
                 rejectUnauthorized: !insecureTls,
                 headers: {
+                    'User-Agent': USER_AGENT,
                     'X-Auth-Token': token,
                     'X-Artifact-Page': artifact.page,
                     'X-Artifact-Variant': artifact.variant,
