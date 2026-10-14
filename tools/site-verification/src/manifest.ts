@@ -52,6 +52,14 @@ export function runnerVersion(): string {
  */
 export const USER_AGENT = `phone-home-site-verification/${runnerVersion()}`;
 
+/**
+ * The headers every request the runner makes itself carries. Spread last, so nothing a caller or a
+ * site passes can replace the token or drop the User-Agent.
+ */
+function runnerHeaders(token: string): Record<string, string> {
+    return { 'User-Agent': USER_AGENT, 'X-Auth-Token': token, Accept: 'application/json' };
+}
+
 /** The manifest contract version this runner understands. */
 export const SUPPORTED_SCHEMA_VERSION = 1;
 
@@ -99,12 +107,9 @@ function postJson(url: string, token: string, insecureTls: boolean, body = '{}',
                 method: 'POST',
                 timeout: 15_000,
                 rejectUnauthorized: !insecureTls,
-                // After the site's headers, so nothing a site configures can drop it.
                 headers: {
                     ...siteHeaders,
-                    'User-Agent': USER_AGENT,
-                    'X-Auth-Token': token,
-                    Accept: 'application/json',
+                    ...runnerHeaders(token),
                     'Content-Type': 'application/json',
                     'Content-Length': Buffer.byteLength(body),
                 },
@@ -194,11 +199,9 @@ function dashboardRequest(
                 timeout: 30_000,
                 rejectUnauthorized: !insecureTls,
                 headers: {
-                    'User-Agent': USER_AGENT,
-                    'X-Auth-Token': token,
-                    Accept: 'application/json',
                     ...(body === undefined ? {} : { 'Content-Length': Buffer.byteLength(body) }),
                     ...options.headers,
+                    ...runnerHeaders(token),
                 },
             },
             (res) => {
@@ -437,11 +440,9 @@ export function postArtifact(
                 timeout: 30_000,
                 rejectUnauthorized: !insecureTls,
                 headers: {
-                    'User-Agent': USER_AGENT,
-                    'X-Auth-Token': token,
                     'X-Artifact-Page': artifact.page,
                     'X-Artifact-Variant': artifact.variant,
-                    Accept: 'application/json',
+                    ...runnerHeaders(token),
                     'Content-Type': 'image/png',
                     'Content-Length': body.byteLength,
                 },

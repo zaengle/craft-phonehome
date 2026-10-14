@@ -3,10 +3,11 @@ import { createServer, type IncomingMessage, type RequestListener, type Server }
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 import { cfAccessHeaders, continueWithAccess } from '../../src/access';
 import { siteAccessHeaders } from '../../src/config';
-import { bundlePaths, fetchReport, isAbort, USER_AGENT } from '../../src/manifest';
+import { bundlePaths, fetchReport, isAbort, postArtifact, USER_AGENT } from '../../src/manifest';
 
 test('the plugin API receives both staging basic auth and the Phone Home token', async () => {
     let received: IncomingMessage['headers'] = {};
@@ -40,6 +41,29 @@ test('the runner names itself and its release in the User-Agent of the requests 
 
     // Cloudflare challenges a request without one from a datacenter address, which no WAF rule skips.
     expect(USER_AGENT).toBe(`phone-home-site-verification/${version}`);
+});
+
+test('a screenshot posted to the dashboard carries the runner\'s User-Agent', async () => {
+    let received: IncomingMessage['headers'] = {};
+    const dashboard = createServer((request, response) => {
+        received = request.headers;
+        request.resume();
+        request.on('end', () => response.writeHead(201, { 'Content-Type': 'application/json' }).end('{}'));
+    });
+    await new Promise<void>((resolve) => dashboard.listen(0, '127.0.0.1', resolve));
+    const file = join(tmpdir(), `phv-artifact-${process.pid}.png`);
+    writeFileSync(file, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    try {
+        const address = dashboard.address();
+        if (address === null || typeof address === 'string') throw new Error('No server address');
+        const posted = await postArtifact(`http://127.0.0.1:${address.port}`, 1, 'site-token', { page: 'home', variant: 'actual', file }, false);
+        expect(posted.status).toBe(201);
+        expect(received['user-agent']).toBe(USER_AGENT);
+        expect(received['x-auth-token']).toBe('site-token');
+    } finally {
+        rmSync(file, { force: true });
+        await new Promise<void>((resolve, reject) => dashboard.close((error) => error ? reject(error) : resolve()));
+    }
 });
 
 const runner = new URL('../../', import.meta.url).pathname;
